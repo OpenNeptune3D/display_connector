@@ -1,0 +1,6 @@
+pyserial
+moonrakerpy
+nextion
+pyserial_asyncio
+pillow
+watchdog
