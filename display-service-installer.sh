@@ -74,19 +74,19 @@ echo "Allowing Moonraker to control display service"
 grep -qxF 'display' $MOONRAKER_ASVC || echo 'display' >> $MOONRAKER_ASVC
 
 # Define the lines to be inserted or updated
-new_lines="[update_manager display_connector]
-type: git_repo
-primary_branch: main
-path: ~/display_connector
-origin: https://github.com/OpenNeptune3D/display_connector.git"
+new_lines="[update_manager display]\n\
+type: git_repo\n\
+primary_branch: main\n\
+path: ~\/display_connector\n\
+origin: https:\/\/github.com\/OpenNeptune3D\/display.git"
 
 # Define the path to the moonraker.conf file
 config_file="$HOME/printer_data/config/moonraker.conf"
 
 # Check if the lines exist in the config file
-if grep -qF "[update_manager display_connector]" "$config_file"; then
+if grep -qF "[update_manager display]" "$config_file"; then
     # Lines exist, update them
-    sed -i "/[update_manager display_connector]/,/^$/c$new_lines" "$config_file"
+    perl -pi.bak -e "BEGIN{undef $/;} s|\[update_manager display\].*?((?:\r*\n){2}\|$)|$new_lines\$1|gs" "$config_file"
 else
     # Lines do not exist, append them to the end of the file
     echo -e "\n$new_lines" >> "$config_file"
