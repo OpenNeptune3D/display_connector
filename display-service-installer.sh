@@ -78,6 +78,7 @@ new_lines="[update_manager display]\n\
 type: git_repo\n\
 primary_branch: main\n\
 path: ~/display_connector\n\
+virtualenv: ~/display_connector/venv\n\
 origin: https://github.com\/OpenNeptune3D/display.git"
 
 # Define the path to the moonraker.conf file
