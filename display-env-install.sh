@@ -4,7 +4,7 @@ sudo apt update
 sudo apt install python3.11-venv -y
 
 # Navigate to the script directory
-cd ~/OpenNept4une/display
+cd ~/display_connector
 
 # Create a Python virtual environment in the current directory
 python3 -m venv venv
