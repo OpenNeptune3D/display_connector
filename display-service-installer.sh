@@ -1,14 +1,15 @@
 #!/bin/bash
 
-sudo rm -rf ~/OpenNept4une/display/venv
-rm -rf ~/OpenNept4une/display/__pycache__
+sudo rm -rf ~/display_connector/venv
+rm -rf ~/display_connector/__pycache__
 # Run the first script
-~/OpenNept4une/display/display-env-install.sh
+~/display_connector/display-env-install.sh
 
 # Define the service file path, script path, and log file path
-SERVICE_FILE="/etc/systemd/system/OpenNept4une.service"
-SCRIPT_PATH="$HOME/OpenNept4une/display/display.py"
-VENV_PATH="$HOME/OpenNept4une/display/venv"
+OLD_SERVICE_FILE="/etc/systemd/system/OpenNept4une.service"
+SERVICE_FILE="/etc/systemd/system/display.service"
+SCRIPT_PATH="$HOME/display_connector/display.py"
+VENV_PATH="$HOME/display_connector/venv"
 LOG_FILE="/var/log/display.log"
 MOONRAKER_ASVC="$HOME/printer_data/moonraker.asvc"
 
@@ -19,11 +20,19 @@ if [ ! -f "$SCRIPT_PATH" ]; then
 fi
 
 # Check if the old service exists and is running
+if systemctl is-active --quiet OpenNept4une; then
+    # Stop the service silently
+    sudo service OpenNept4une stop >/dev/null 2>&1
+    # Disable the service silently
+    sudo service OpenNept4une disable >/dev/null 2>&1
+    sudo rm -f $OLD_SERVICE_FILE
+else
+    echo "Continuing..."
+fi
+
 if systemctl is-active --quiet display; then
     # Stop the service silently
     sudo service display stop >/dev/null 2>&1
-    # Disable the service silently
-    sudo service display disable >/dev/null 2>&1
 else
     echo "Continuing..."
 fi
@@ -39,8 +48,8 @@ Documentation=man:display(8)
 
 [Service]
 ExecStartPre=/bin/sleep 10
-ExecStart=/home/mks/OpenNept4une/display/venv/bin/python /home/mks/OpenNept4une/display/display.py
-WorkingDirectory=/home/mks/OpenNept4une/display
+ExecStart=/home/mks/display_connector/venv/bin/python /home/mks/display_connector/display.py
+WorkingDirectory=/home/mks/display_connector
 Restart=on-failure
 CPUQuota=50%
 RestartSec=10
@@ -58,26 +67,26 @@ sudo systemctl daemon-reload
 
 # Enable and start the service
 echo "Enabling and starting the service..."
-sudo systemctl enable OpenNept4une.service
-sudo systemctl start OpenNept4une.service
+sudo systemctl enable display.service
+sudo systemctl start display.service
 
 echo "Allowing Moonraker to control display service"
-grep -qxF 'OpenNept4une' $MOONRAKER_ASVC || echo 'OpenNept4une' >> $MOONRAKER_ASVC
+grep -qxF 'display' $MOONRAKER_ASVC || echo 'display' >> $MOONRAKER_ASVC
 
 # Define the lines to be inserted or updated
-new_lines="[update_manager OpenNept4une]
+new_lines="[update_manager display_connector]
 type: git_repo
 primary_branch: main
-path: ~/OpenNept4une
-origin: https://github.com/OpenNeptune3D/OpenNept4une.git"
+path: ~/display_connector
+origin: https://github.com/OpenNeptune3D/display_connector.git"
 
 # Define the path to the moonraker.conf file
 config_file="$HOME/printer_data/config/moonraker.conf"
 
 # Check if the lines exist in the config file
-if grep -qF "[update_manager OpenNept4une]" "$config_file"; then
+if grep -qF "[update_manager display_connector]" "$config_file"; then
     # Lines exist, update them
-    sed -i "/[update_manager OpenNept4une]/,/^$/c$new_lines" "$config_file"
+    sed -i "/[update_manager display_connector]/,/^$/c$new_lines" "$config_file"
 else
     # Lines do not exist, append them to the end of the file
     echo -e "\n$new_lines" >> "$config_file"
