@@ -79,7 +79,7 @@ class Neptune4Mapper(Mapper):
             },
             "print_stats": {
                 "print_duration": [MappingLeaf([build_accessor(self.map_page(PAGE_PRINTING), "6")], formatter=format_time)],
-                "filename": [MappingLeaf([build_accessor(self.map_page(PAGE_PRINTING), "t0")], formatter=lambda x: x.replace(".gcode", ""))],
+                "filename": [MappingLeaf([build_accessor(self.map_page(PAGE_PRINTING), "t0")], formatter=build_format_filename("printing"))],
             },
             "gcode_move": {
                 "extrude_factor": [MappingLeaf([build_accessor(self.map_page(PAGE_PRINTING), "flow_speed")], formatter=format_percent),
