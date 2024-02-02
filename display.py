@@ -280,13 +280,15 @@ class DisplayController:
             self._write('fill 0,400,320,60,' + str(BACKGROUND_GRAY))
             self._write('xstr 0,400,320,30,1,65535,' + str(BACKGROUND_GRAY) + ',1,1,1,"OpenNept4une"')
             self._write('xstr 0,430,320,30,2,GRAY,' + str(BACKGROUND_GRAY) + ',1,1,1,"github.com/halfmanbear/OpenNept4une"')
+        elif current_page == PAGE_CONFIRM_PRINT:
+            self._loop.create_task(self.set_data_prepare_screen(self.current_filename))
         elif current_page == PAGE_PRINTING:
             self._write("printvalue.xcen=0")
             self._write("move printvalue,13,267,13,267,0,10")
             self._write("vis b[16],0")
         elif current_page == PAGE_PRINTING_COMPLETE:
             self._write(f'b[4].txt="Print Completed!"')
-            self._write(f'b[3].txt="{build_format_filename().format_filename(self.current_filename)}"')
+            self._write(f'b[3].txt="{build_format_filename()(self.current_filename)}"')
             self._write(f'b[5].txt="Time: {format_time(self.current_print_duration)}"')
         elif current_page == PAGE_PRINTING_FILAMENT:
             self.update_printing_heater_settings_ui()
@@ -434,8 +436,6 @@ class DisplayController:
             else:
                 self.current_filename = selected["path"]
                 self._navigate_to_page(PAGE_CONFIRM_PRINT)
-                self._write(f'p[{self._page_id(PAGE_CONFIRM_PRINT)}].b[2].txt="{self.current_filename.replace(".gcode", "").split("/")[-1]}"')
-                self._loop.create_task(self.load_thumbnail_for_page(self.current_filename, "18"))
         elif action == "print_opened_file":
             self._go_back()
             self._navigate_to_page(PAGE_OVERLAY_LOADING)
@@ -905,12 +905,30 @@ class DisplayController:
         if len(self.history) > 0:
             return self.history[-1]
         return None
+    
+    async def set_data_prepare_screen(self, filename):
+        metadata = await self.get_metadata(filename)
+        self._write(f'p[{self._page_id(PAGE_CONFIRM_PRINT)}].b[3].font=2')
+        self._write(f'p[{self._page_id(PAGE_CONFIRM_PRINT)}].b[2].txt="{build_format_filename()(filename)}"')
+        info = []
+        if "layer_height" in metadata:
+            info.append(f"Layer: {metadata['layer_height']}mm")
+        if "estimated_time" in metadata:
+            info.append(f"Time: {format_time(metadata['estimated_time'])}")
+        self._write(f'p[{self._page_id(PAGE_CONFIRM_PRINT)}].b[3].txt="{" ".join(info)}"')
 
-    async def load_thumbnail_for_page(self, filename, page_number):
-        logger.info("Loading thumbnail for " + filename)
+        await self.load_thumbnail_for_page(filename, self._page_id(PAGE_CONFIRM_PRINT), metadata)
+
+    async def load_metadata(self, filename):
         metadata = await self._send_moonraker_request("server.files.metadata", {"filename": filename})
+        return metadata["result"]
+
+    async def load_thumbnail_for_page(self, filename, page_number, metadata=None):
+        logger.info("Loading thumbnail for " + filename)
+        if metadata is None:
+            metadata = await self.load_metadata(filename)
         best_thumbnail = None
-        for thumbnail in metadata["result"]["thumbnails"]:
+        for thumbnail in metadata["thumbnails"]:
             if thumbnail["width"] == 160:
                 best_thumbnail = thumbnail
                 break
