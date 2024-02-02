@@ -166,6 +166,9 @@ class DisplayController:
 
     def _handle_config(self):
         logger.info("Loading config")
+        if "general" in self.config:
+            if "clean_filename_regex" in self.config["general"]:
+                filename_regex_wrapper["default"] = re.compile(self.config["general"]["clean_filename_regex"])
 
         if "LOGGING" in self.config:
             if "file_log_level" in  self.config["LOGGING"]:
@@ -181,6 +184,8 @@ class DisplayController:
         if "print_screen" in self.config:
             if "z_display" in self.config["print_screen"]:
                 self.z_display = self.config["print_screen"]["z_display"]
+            if "clean_filename_regex" in self.config["print_screen"]:
+                filename_regex_wrapper["printing"] = re.compile(self.config["print_screen"]["clean_filename_regex"])
 
         if "prepare" in self.config:
             prepare = self.config["prepare"]
@@ -279,6 +284,10 @@ class DisplayController:
             self._write("printvalue.xcen=0")
             self._write("move printvalue,13,267,13,267,0,10")
             self._write("vis b[16],0")
+        elif current_page == PAGE_PRINTING_COMPLETE:
+            self._write(f'b[4].txt="Print Completed!"')
+            self._write(f'b[3].txt="{build_format_filename().format_filename(self.current_filename)}"')
+            self._write(f'b[5].txt="Time: {format_time(self.current_print_duration)}"')
         elif current_page == PAGE_PRINTING_FILAMENT:
             self.update_printing_heater_settings_ui()
             self.update_printing_temperature_increment_ui()
@@ -636,7 +645,7 @@ class DisplayController:
                     "path": self._build_path(self.current_dir, item["filename"]),
                     "size": item["size"],
                     "modified": item["modified"],
-                    "name": item["filename"]
+                    "name": build_format_filename().format_filename(item["filename"])
                 })
         sort_folders_first = True
         if "files" in self.config:
@@ -663,7 +672,7 @@ class DisplayController:
         component_index = 0
         for index in range(self.files_page * page_size, min(len(self.dir_contents), (self.files_page + 1) * page_size)):
             file = self.dir_contents[index]
-            self._write(f'p[{self._page_id(PAGE_FILES)}].b[{component_index + 18}].txt="{file["name"].replace(".gcode", "")}"')
+            self._write(f'p[{self._page_id(PAGE_FILES)}].b[{component_index + 18}].txt="{file["name"]}"')
             if file["type"] == "dir":
                 self._write(f'p[{self._page_id(PAGE_FILES)}].b[{component_index + 13}].pic=194')
             else:
@@ -969,6 +978,9 @@ class DisplayController:
                     if current_page == None or current_page in PRINTING_PAGES or current_page == PAGE_PRINTING_COMPLETE:
                         self._navigate_to_page(PAGE_MAIN)
 
+            if "print_duration" in new_data["print_stats"]:
+                self.current_print_duration = new_data["print_stats"]["print_duration"]
+
             if "display_status" in new_data and "progress" in new_data["display_status"] and "print_duration" in new_data["print_stats"]:
                 if new_data["display_status"]["progress"] > 0:
                     total_time = new_data["print_stats"]["print_duration"] / new_data["display_status"]["progress"]
@@ -1179,6 +1191,8 @@ try:
     config = configparser.ConfigParser(allow_no_value=True)
     if not os.path.exists(config_file):
         logger.info("Creating config file")
+        config.add_section('general')
+        config.set('general', 'clean_filename_regex', '.*_(.*?_(?:[0-9]+h|[0-9]+m|[0-9]+s)+\.gcode)')
         config.add_section('LOGGING')
         config.set('LOGGING', 'file_log_level', 'ERROR')
 

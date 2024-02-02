@@ -1,3 +1,4 @@
+import re
 import time
 
 PAGE_MAIN = "main"
@@ -54,6 +55,20 @@ def format_percent(value):
     if value is None:
         return "N/A"
     return f"{value * 100:2.0f}%"
+
+# This attempts to strip the printer definition, the time estimate and the file extension from the filename
+filename_regex_wrapper = {
+    "default": re.compile(r"(.*)_.*?_(?:[0-9]+h|[0-9]+m|[0-9]+s)+\.gcode"),
+    "printing": re.compile(r"(.*)_.*?_.*?_.*?_(?:[0-9]+h|[0-9]+m|[0-9]+s)+\.gcode")
+}
+def build_format_filename(context):
+    def format_filename(filename):
+        filename = filename.split("/")[-1]
+        match = filename_regex_wrapper[context if context else "default"].match(filename)
+        if match is not None:
+            return match.group(1)
+        return filename.replace(".gcode", "")
+    return format_filename
 
 class MappingLeaf:
     def __init__(self, fields, field_type="txt", formatter=None):
