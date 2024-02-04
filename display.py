@@ -909,7 +909,7 @@ class DisplayController:
         return None
     
     async def set_data_prepare_screen(self, filename):
-        metadata = await self.get_metadata(filename)
+        metadata = await self.load_metadata(filename)
         self._write(f'p[{self._page_id(PAGE_CONFIRM_PRINT)}].b[3].font=2')
         self._write(f'p[{self._page_id(PAGE_CONFIRM_PRINT)}].b[2].txt="{build_format_filename()(filename)}"')
         info = []
@@ -1039,20 +1039,7 @@ class DisplayController:
                 self.printing_target_speeds["print"] = float(new_data["gcode_move"]["speed_factor"])
                 self.update_printing_speed_settings_ui()
 
-        is_dict = isinstance(new_data, dict)
-        for key in new_data if is_dict else range(len(new_data)):
-            if key in data_mapping:
-                value = new_data[key]
-                mapping_value = data_mapping[key]
-                if isinstance(mapping_value, dict):
-                    self.handle_status_update(value, mapping_value)
-                elif isinstance(mapping_value, list):
-                    for mapping_leaf in mapping_value:
-                        for mapped_key in mapping_leaf.fields:
-                            if mapping_leaf.field_type == "txt":
-                                self._write(f'{mapped_key}.{mapping_leaf.field_type}="{mapping_leaf.format(value)}"')
-                            else:
-                                self._write(f'{mapped_key}.{mapping_leaf.field_type}={mapping_leaf.format(value)}')
+        self._loop.create_task(self.display.update_data(new_data, data_mapping))
 
     async def close(self):
         if not self.connected:
