@@ -317,14 +317,16 @@ class DisplayController:
         elif current_page == PAGE_PRINTING_DIALOG_FLOW:
             self._write("b[3].maxval=200")
 
-    def _navigate_to_page(self, page):
+    def _navigate_to_page(self, page, clear_history = False):
         if len(self.history) == 0 or self.history[-1] != page:
             if page in TABBED_PAGES and self.history[-1] in TABBED_PAGES:
                 self.history[-1] = page
             else:
+                if clear_history:
+                    self.history = []
                 self.history.append(page)
             self._write(f"page {self.display.mapper.map_page(page)}")
-            logger.debug(f"Navigating page {page}")
+            logger.debug(f"Navigating to {page}")
             self._loop.create_task(self.special_page_handling())
 
     def execute_action(self, action):
@@ -837,7 +839,7 @@ class DisplayController:
             logger.info("Reconnected to Display")
             self.history = []
             self.initialize_display()
-            self._navigate_to_page(PAGE_MAIN)
+            self._navigate_to_page(PAGE_MAIN, clear_history=True)
         else:
             logger.info(f"Unhandled Event: {type} {data}")
 
@@ -988,13 +990,13 @@ class DisplayController:
                     elif state == "paused":
                         self._write(f'p[{self._page_id(PAGE_PRINTING)}].b[44].pic=69')
                     if current_page == None or current_page not in PRINTING_PAGES:
-                        self._navigate_to_page(PAGE_PRINTING)
+                        self._navigate_to_page(PAGE_PRINTING, clear_history=True)
                 elif state == "complete":
                     if current_page == None or current_page != PAGE_PRINTING_COMPLETE:
                         self._navigate_to_page(PAGE_PRINTING_COMPLETE)
                 else:
                     if current_page == None or current_page in PRINTING_PAGES or current_page == PAGE_PRINTING_COMPLETE:
-                        self._navigate_to_page(PAGE_MAIN)
+                        self._navigate_to_page(PAGE_MAIN, clear_history=True)
 
             if "print_duration" in new_data["print_stats"]:
                 self.current_print_duration = new_data["print_stats"]["print_duration"]
