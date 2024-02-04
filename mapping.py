@@ -71,14 +71,22 @@ def build_format_filename(context=None):
     return format_filename
 
 class MappingLeaf:
-    def __init__(self, fields, field_type="txt", formatter=None):
+    def __init__(self, fields, field_type="txt", required_fields=None, formatter=None):
         self.fields = fields
         self.field_type = field_type
+        self.required_fields = required_fields
         self.formatter = formatter
 
     def format(self, value):
         if self.formatter is not None:
             return self.formatter(value)
+        if isinstance(value, float):
+            return f"{value:3.2f}"
+        return str(value)
+    
+    def format(self, value, *required_values):
+        if self.formatter is not None:
+            return self.formatter(value, *required_values)
         if isinstance(value, float):
             return f"{value:3.2f}"
         return str(value)

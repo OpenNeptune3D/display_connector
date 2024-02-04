@@ -106,7 +106,10 @@ class Neptune4Mapper(Mapper):
         if value == "mm":
             self.data_mapping["motion_report"]["live_position"][2] = [MappingLeaf([build_accessor(self.map_page(PAGE_MAIN), "z_pos"), build_accessor(self.map_page(PAGE_PRINTING), "zvalue")])]
         elif value == "layer":
-            self.data_mapping["print_stats"]["info"] = {"current_layer": [MappingLeaf([build_accessor(self.map_page(PAGE_PRINTING), "zvalue")])] }
+            self.data_mapping["print_stats"]["info"] = {
+                "current_layer": [MappingLeaf([build_accessor(self.map_page(PAGE_PRINTING), "zvalue")], required_fields=[["print_stats", "info", "total_layer"]], formatter=lambda current, total: f"{current:.0f}/{total:.0f}")],
+                "total_layer": [MappingLeaf([])]
+                }
 
 
 class Neptune4ProMapper(Neptune4Mapper):
