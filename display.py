@@ -647,7 +647,7 @@ class DisplayController:
                     "path": self._build_path(self.current_dir, item["filename"]),
                     "size": item["size"],
                     "modified": item["modified"],
-                    "name": build_format_filename().format_filename(item["filename"])
+                    "name": build_format_filename()(item["filename"])
                 })
         sort_folders_first = True
         if "files" in self.config:
@@ -937,7 +937,8 @@ class DisplayController:
             if best_thumbnail is None or thumbnail["width"] > best_thumbnail["width"]:
                 best_thumbnail = thumbnail
         if best_thumbnail is None:
-            self._write("vis cp0,0", True)
+            if self._get_current_page() == page_number:
+                self._write("vis cp0,0", True)
             return
 
         path = "/".join(filename.split("/")[:-1])
@@ -963,7 +964,8 @@ class DisplayController:
 
         parts.append(image[start:len(image)])
         self.is_blocking_serial = True
-        self._write("vis cp0,1", True)
+        if self._get_current_page() == page_number:
+            self._write("vis cp0,1", True)
         self._write("p[" + str(page_number) + "].cp0.close()", True)
         for part in parts:
             self._write("p[" + str(page_number) + "].cp0.write(\"" + str(part) + "\")", True)
