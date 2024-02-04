@@ -1155,11 +1155,12 @@ class DisplayController:
     def draw_kamp_box_index(self, index, color):
         if self.bed_leveling_counts[0] == 0:
             return
-        row = (self.bed_leveling_counts[0]-1) - int(index / self.bed_leveling_counts[0])
+        row = int(index / self.bed_leveling_counts[0])
+        inverted_row = (self.bed_leveling_counts[1]-1) - row
         col = index % self.bed_leveling_counts[0]
         if row % 2 == 1:
-          col = self.bed_leveling_counts[1] - 1 - col
-        self.draw_kamp_box(col, row, color)
+            col = self.bed_leveling_counts[0] - 1 - col
+        self.draw_kamp_box(col, inverted_row, color)
 
     def draw_kamp_box(self, x, y, color):
         box_size = self.bed_leveling_box_size
