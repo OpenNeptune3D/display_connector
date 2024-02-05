@@ -13,11 +13,7 @@ VENV_PATH="$HOME/display_connector/venv"
 LOG_FILE="/var/log/display.log"
 MOONRAKER_ASVC="$HOME/printer_data/moonraker.asvc"
 
-# Check if the script exists
-if [ ! -f "$SCRIPT_PATH" ]; then
-    echo "Error: Script $SCRIPT_PATH not found."
-    exit 1
-fi
+current_branch=$(git -C "$HOME/display_connector" branch --show-current 2>/dev/null)
 
 # Check if the old service exists and is running
 if systemctl is-active --quiet OpenNept4une; then
@@ -76,7 +72,7 @@ grep -qxF 'display' $MOONRAKER_ASVC || echo 'display' >> $MOONRAKER_ASVC
 # Define the lines to be inserted or updated
 new_lines="[update_manager display]\n\
 type: git_repo\n\
-primary_branch: main\n\
+primary_branch: $current_branch\n\
 path: ~/display_connector\n\
 virtualenv: ~/display_connector/venv\n\
 requirements: requirements.txt\n\
