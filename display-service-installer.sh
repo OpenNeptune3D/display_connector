@@ -79,7 +79,8 @@ type: git_repo\n\
 primary_branch: main\n\
 path: ~/display_connector\n\
 virtualenv: ~/display_connector/venv\n\
-origin: https://github.com\/OpenNeptune3D/display.git"
+requirements: requirements.txt\n\
+origin: https://github.com/OpenNeptune3D/display_connector.git"
 
 # Define the path to the moonraker.conf file
 config_file="$HOME/printer_data/config/moonraker.conf"
