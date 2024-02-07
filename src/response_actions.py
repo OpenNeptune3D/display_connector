@@ -1,4 +1,4 @@
-from mapping import *
+from src.mapping import *
 
 response_actions = {
     1: {

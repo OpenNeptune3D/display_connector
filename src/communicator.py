@@ -1,5 +1,5 @@
 from logging import Logger
-from tjc import TJCClient
+from src.tjc import TJCClient
 
 class DisplayCommunicator:
     supported_firmware_versions = []
