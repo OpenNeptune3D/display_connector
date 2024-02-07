@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="pictures/OpenNept4une.png" alt="OpenNept4une Logo">
+  <img src="https://github.com/OpenNeptune3D/OpenNept4une/raw/main/pictures/OpenNept4une.png" alt="OpenNept4une Logo" width="250">
   <h1 align="center">OpenNept4une Display Connector</h1>
 </p>
 
