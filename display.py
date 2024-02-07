@@ -11,6 +11,7 @@ import asyncio
 import traceback
 from PIL import Image
 from urllib.request import pathname2url
+from src.config import TEMP_DEFAULTS, ConfigHandler
 from watchdog.observers import Observer
 from watchdog.events import PatternMatchingEventHandler
 from math import ceil, floor
@@ -35,15 +36,8 @@ file_log.setFormatter(formatter)
 logger.addHandler(file_log)
 logger.setLevel(logging.DEBUG)
 
-config_file = os.path.expanduser("~/printer_data/config/display_connector.cfg")
 comms_directory = os.path.expanduser("~/printer_data/comms")
-
-TEMP_DEFAULTS = {
-    "pla": [210, 60],
-    "abs": [240, 110],
-    "petg": [240, 80],
-    "tpu": [240, 60]
-}
+config_file = os.path.expanduser("~/printer_data/config/display_connector.cfg")
 
 PRINTING_PAGES = [
     PAGE_PRINTING,
@@ -160,7 +154,7 @@ class DisplayController:
         self.last_config_change = time.time()
         logger.info("Config file changed, Reloading")
         self._navigate_to_page(PAGE_OVERLAY_LOADING)
-        self.config.read(config_file)
+        self.config.reload_config()
         self._handle_config()
         self._go_back()
 
@@ -547,8 +541,7 @@ class DisplayController:
             self.config["temperatures." + self.temperature_preset_material] = {}
         self.config.set("temperatures." + self.temperature_preset_material, "extruder", str(self.temperature_preset_extruder))
         self.config.set("temperatures." + self.temperature_preset_material, "heater_bed", str(self.temperature_preset_bed))
-        with open(config_file, 'w') as configfile:
-            self.config.write(configfile)
+        self.config.write_changes()
         self._go_back()
 
     def update_printing_heater_settings_ui(self):
@@ -1198,55 +1191,7 @@ loop = asyncio.get_event_loop()
 config_observer = Observer()
 
 try:
-    config = configparser.ConfigParser(allow_no_value=True)
-    if not os.path.exists(config_file):
-        logger.info("Creating config file")
-        config.add_section('general')
-        config.set('general', 'clean_filename_regex', '.*_(.*?_(?:[0-9]+h|[0-9]+m|[0-9]+s)+\.gcode)')
-        config.add_section('LOGGING')
-        config.set('LOGGING', 'file_log_level', 'ERROR')
-
-        config.add_section('files')
-        config.set('files', 'sort_by', 'modified')
-        config.set('files', 'sort_order', 'desc')
-        config.set('files', 'sort_folders_first', 'true')
-
-        config.add_section('main_screen')
-        config.set('main_screen', '; set to MODEL_NAME for built in model name. Remove to use Elegoo model images.')
-        config.set('main_screen', 'display_name', 'MODEL_NAME')
-        config.set('main_screen', '; color for the line below the model name. As RGB565 value.')
-        config.set('main_screen', 'display_name_line_color', '1725')
-
-        config.add_section('print_screen')
-        config.set('print_screen', 'z_display', 'mm')
-
-        config.add_section('thumbnails')
-        config.set('main_screen', '; Background color for thumbnails. As RGB Hex value. Remove for default background color.')
-        config.set('thumbnails', 'background_color', '29354a')
-
-        config.add_section('temperatures.pla')
-        config.set('temperatures.pla', 'extruder', str(TEMP_DEFAULTS["pla"][0]))
-        config.set('temperatures.pla', 'heater_bed', str(TEMP_DEFAULTS["pla"][1]))
-        config.add_section('temperatures.petg')
-        config.set('temperatures.petg', 'extruder', str(TEMP_DEFAULTS["petg"][0]))
-        config.set('temperatures.petg', 'heater_bed', str(TEMP_DEFAULTS["petg"][1]))
-        config.add_section('temperatures.abs')
-        config.set('temperatures.abs', 'extruder', str(TEMP_DEFAULTS["abs"][0]))
-        config.set('temperatures.abs', 'heater_bed', str(TEMP_DEFAULTS["abs"][1]))
-        config.add_section('temperatures.tpu')
-        config.set('temperatures.tpu', 'extruder', str(TEMP_DEFAULTS["tpu"][0]))
-        config.set('temperatures.tpu', 'heater_bed', str(TEMP_DEFAULTS["tpu"][1]))
-
-        config.add_section('prepare')
-        config.set('prepare', 'move_distance', '1')
-        config.set('prepare', 'xy_move_speed', '130')
-        config.set('prepare', 'z_move_speed', '10')
-        config.set('prepare', 'extrude_amount', '10')
-        config.set('prepare', 'extrude_speed', '5')
-
-        with open(config_file, 'w') as configfile:
-            config.write(configfile)
-    config.read(config_file)
+    config = ConfigHandler(config_file, logger)
 
     controller = DisplayController(config)
     controller._loop = loop
@@ -1270,10 +1215,9 @@ try:
     socket_event_handler.on_created = handle_sock_changes
     socket_event_handler.on_deleted = handle_sock_changes
 
-    config_observer.schedule(config_event_handler, config_file, recursive=False)
+    config_observer.schedule(config_event_handler, config.file, recursive=False)
     config_observer.schedule(socket_event_handler, comms_directory, recursive=False)
     config_observer.start()
-
 
     loop.call_later(1, controller.start_listening)
     loop.run_forever()
