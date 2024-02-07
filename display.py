@@ -15,12 +15,12 @@ from watchdog.observers import Observer
 from watchdog.events import PatternMatchingEventHandler
 from math import ceil, floor
 
-from lib.tjc import TJCClient, EventType
-from lib.response_actions import response_actions, input_actions, custom_touch_actions
-from lib.lib_col_pic import parse_thumbnail
-from lib.elegoo_neptune4 import *
-from lib.mapping import *
-from lib.colors import *
+from src.tjc import TJCClient, EventType
+from src.response_actions import response_actions, input_actions, custom_touch_actions
+from src.lib_col_pic import parse_thumbnail
+from src.elegoo_neptune4 import *
+from src.mapping import *
+from src.colors import *
 
 log_file = os.path.expanduser("~/printer_data/logs/display_connector.log")
 logger = logging.getLogger(__name__)
