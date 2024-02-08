@@ -1166,8 +1166,8 @@ class DisplayController:
                 self.update_zprobe_leveling_ui()
         elif "Adapted probe count:" in response:
             parts = response.split(":")[1].split(",")
-            x_count = int(parts[0].strip())
-            y_count = int(parts[1][:-1].strip())
+            x_count = int(parts[0].strip(" ()"))
+            y_count = int(parts[1][:-1].strip(" ()"))
             self.bed_leveling_counts = [x_count, y_count]
         elif response.startswith("// bed_mesh: generated points"):
             if self._get_current_page() != PAGE_PRINTING_KAMP:
