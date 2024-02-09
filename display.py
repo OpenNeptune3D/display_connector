@@ -987,7 +987,7 @@ class DisplayController:
                     if current_page == None or current_page != PAGE_PRINTING_COMPLETE:
                         self._navigate_to_page(PAGE_PRINTING_COMPLETE)
                 else:
-                    if current_page == None or current_page in PRINTING_PAGES or current_page == PAGE_PRINTING_COMPLETE:
+                    if current_page == None or current_page in PRINTING_PAGES or current_page == PAGE_PRINTING_COMPLETE or current_page == PAGE_OVERLAY_LOADING:
                         self._navigate_to_page(PAGE_MAIN, clear_history=True)
 
             if "print_duration" in new_data["print_stats"]:
