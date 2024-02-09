@@ -970,10 +970,9 @@ class DisplayController:
         if "print_stats" in new_data:
             if "filename" in new_data["print_stats"]:
                 filename = new_data["print_stats"]["filename"]
-                if filename != self.current_filename:
-                    self.current_filename = filename
-                    if filename is not None and filename != "":
-                        self._loop.create_task(self.load_thumbnail_for_page(self.current_filename, "19"))
+                self.current_filename = filename
+                if filename is not None and filename != "":
+                    self._loop.create_task(self.load_thumbnail_for_page(self.current_filename, "19"))
             if "state" in new_data["print_stats"]:
                 state = new_data["print_stats"]["state"]
                 self.current_state = state
