@@ -372,10 +372,8 @@ class DisplayController:
                 self._navigate_to_page(PAGE_PRINTING_PAUSE)
         elif action == "pause_print_confirm":
             self._go_back()
-            logger.info("Pausing print")
-        elif action == "resume_print":
-            self._go_back()
             self._loop.create_task(self._send_moonraker_request("printer.print.pause"))
+            logger.info("Pausing print")
         elif action == "stop_print":
             self._go_back()
             self._navigate_to_page(PAGE_OVERLAY_LOADING)
