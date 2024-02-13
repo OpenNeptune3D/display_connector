@@ -34,7 +34,7 @@ class TJCProtocol(NextionProtocol):
         0x67: 9,  # Touch Coordinate(awake)
         0x68: 9,  # Touch Coordinate(sleep)
         0x69: 8,  # Slider Value
-        0x71: 5,  # Numeric Data Enclosed
+        0x71: 8,  # Numeric Data Enclosed
         0x86: 4,  # Auto Entered Sleep Mode
         0x87: 4,  # Auto Wake from Sleep
         0x88: 4,  # Nextion Ready
@@ -76,14 +76,17 @@ class TJCProtocol(NextionProtocol):
         was_keyboard_input = False
         buffer_len = len(self.buffer)
         if buffer_len < expected_packet_length:
-            return None, was_keyboard_input
+            if buffer_len == 5 and self.buffer[0] == 0x72:
+                expected_packet_length = 5
+            else:
+                return None, was_keyboard_input
 
         full_message = self.buffer[:expected_packet_length]
 
         if full_message[0] == 0x71 and not full_message.endswith(self.EOL):
             # Keyboard input does not result in correct packet length
             full_message += self.EOL
-            full_message = b'0x72' + full_message[1:]
+            full_message = b'\x72' + full_message[1:]
             was_keyboard_input = True
 
         if  not full_message.endswith(self.EOL):
