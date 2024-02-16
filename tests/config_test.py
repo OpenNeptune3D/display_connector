@@ -30,3 +30,10 @@ def test_write_changes(tmp_path):
     config.write_changes()
     with open(str(tmp_path) + '/test_config.ini', 'r') as f:
         assert '[test]\ntest = test' in f.read()
+
+def test_does_not_overwrite_existing_config(tmp_path):
+    with open(str(tmp_path) + '/test_config.ini', 'w') as f:
+        f.write('[test]\ntest = test')
+    ConfigHandler(str(tmp_path) + '/test_config.ini', logger)
+    with open(str(tmp_path) + '/test_config.ini', 'r') as f:
+        assert '[test]\ntest = test' in f.read()
