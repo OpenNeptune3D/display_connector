@@ -39,36 +39,46 @@ PAGE_OVERLAY_LOADING = "overlay_loading"
 
 PAGE_LIGHTS = "lights"
 
+
 def format_temp(value):
     if value is None:
         return "N/A"
     return f"{value:3.1f}°C"
 
+
 def format_time(seconds):
     if seconds is None:
-            return "N/A"
+        return "N/A"
     if seconds < 3600:
         return time.strftime("%Mm %Ss", time.gmtime(seconds))
     return time.strftime("%Hh %Mm", time.gmtime(seconds))
+
 
 def format_percent(value):
     if value is None:
         return "N/A"
     return f"{value * 100:2.0f}%"
 
+
 # This attempts to strip the printer definition, the time estimate and the file extension from the filename
 filename_regex_wrapper = {
     "default": re.compile(r"(.*)_.*?_(?:[0-9]+h|[0-9]+m|[0-9]+s)+\.gcode"),
-    "printing": re.compile(r"(.*)_.*?_.*?_.*?_(?:[0-9]+h|[0-9]+m|[0-9]+s)+\.gcode")
+    "printing": re.compile(r"(.*)_.*?_.*?_.*?_(?:[0-9]+h|[0-9]+m|[0-9]+s)+\.gcode"),
 }
+
+
 def build_format_filename(context=None):
     def format_filename(filename):
         filename = filename.split("/")[-1]
-        match = filename_regex_wrapper[context if context else "default"].match(filename)
+        match = filename_regex_wrapper[context if context else "default"].match(
+            filename
+        )
         if match is not None:
             return match.group(1)
         return filename.replace(".gcode", "")
+
     return format_filename
+
 
 class MappingLeaf:
     def __init__(self, fields, field_type="txt", required_fields=None, formatter=None):
@@ -83,15 +93,15 @@ class MappingLeaf:
         if isinstance(value, float):
             return f"{value:3.2f}"
         return str(value)
-    
-    def format(self, value, *required_values):
+
+    def format_with_required(self, value, *required_values):
         if self.formatter is not None:
             return self.formatter(value, *required_values)
         if isinstance(value, float):
             return f"{value:3.2f}"
         return str(value)
 
-    
+
 def build_accessor(page, field):
     accessor = ""
     try:
@@ -106,6 +116,7 @@ def build_accessor(page, field):
     except ValueError:
         accessor += field
     return accessor
+
 
 class Mapper:
     data_mapping = {}

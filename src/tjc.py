@@ -1,15 +1,15 @@
-from nextion import Nextion, EventType
+from nextion import Nextion
 from nextion.protocol.nextion import NextionProtocol
-from nextion.exceptions import CommandFailed, CommandTimeout, ConnectionFailed
+from nextion.exceptions import CommandTimeout, ConnectionFailed
 
 from collections import namedtuple
 import struct
-import binascii
 from enum import IntEnum
 
 TJCTouchDataPayload = namedtuple("Touch", "page_id component_id")
 TJCStringInputPayload = namedtuple("String", "page_id component_id string")
 TJCNumericInputPayload = namedtuple("Numeric", "page_id component_id value")
+
 
 class EventType(IntEnum):
     TOUCH = 0x65  # Touch event
@@ -23,7 +23,9 @@ class EventType(IntEnum):
     SD_CARD_UPGRADE = 0x89  # Start SD card upgrade
     RECONNECTED = 0x666  # Device reconnected
 
-JUNK_DATA = b'Z\xa5\x06\x83\x10>\x01\x00'
+
+JUNK_DATA = b"Z\xa5\x06\x83\x10>\x01\x00"
+
 
 class TJCProtocol(NextionProtocol):
     PACKET_LENGTH_MAP = {
@@ -42,10 +44,10 @@ class TJCProtocol(NextionProtocol):
         0xFD: 4,  # Transparent Data Finished
         0xFE: 4,  # Transparent Data Ready
     }
-    
+
     def is_event(self, message):
         return len(message) > 0 and message[0] in EventType.__members__.values()
-    
+
     def data_received(self, data):
         self.buffer += data
 
@@ -86,15 +88,15 @@ class TJCProtocol(NextionProtocol):
         if full_message[0] == 0x71 and not full_message.endswith(self.EOL):
             # Keyboard input does not result in correct packet length
             full_message += self.EOL
-            full_message = b'\x72' + full_message[1:]
+            full_message = b"\x72" + full_message[1:]
             was_keyboard_input = True
 
-        if  not full_message.endswith(self.EOL):
+        if not full_message.endswith(self.EOL):
             if self.buffer[0] == 0x65:
                 # Touch event that might have the press/release byte
-                full_message = self.buffer[:expected_packet_length + 1]
+                full_message = self.buffer[: expected_packet_length + 1]
                 if full_message.endswith(self.EOL):
-                    self.buffer = self.buffer[expected_packet_length + 1:]
+                    self.buffer = self.buffer[expected_packet_length + 1 :]
                     return full_message[:-3], was_keyboard_input
             message = self._extract_varied_length_packet()
             if message is None:
@@ -109,7 +111,7 @@ class TJCProtocol(NextionProtocol):
             was_keyboard_input = False
 
         return full_message[:-3], was_keyboard_input
-        
+
     def _extract_varied_length_packet(self):
         message, eol, leftover = self.buffer.partition(self.EOL)
         if eol == b"":
@@ -121,12 +123,13 @@ class TJCProtocol(NextionProtocol):
         self.buffer = leftover
         return message, False
 
+
 class TJCClient(Nextion):
     is_reconnecting = False
 
     def _make_protocol(self):
         return TJCProtocol(event_message_handler=self.event_message_handler)
-    
+
     def event_message_handler(self, message):
         typ = message[0]
         if typ == EventType.TOUCH:  # Touch event
@@ -156,11 +159,11 @@ class TJCClient(Nextion):
 
     async def connect(self) -> None:
         try:
-            result = await self._try_connect_on_different_baudrates()
+            await self._try_connect_on_different_baudrates()
 
             try:
                 await self._command("bkcmd=3", attempts=1)
-            except CommandTimeout as e:
+            except CommandTimeout:
                 pass  # it is fine
 
             await self._update_sleep_status()

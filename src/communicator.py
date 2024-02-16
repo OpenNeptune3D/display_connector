@@ -1,18 +1,26 @@
 from logging import Logger
 from src.tjc import TJCClient
 
+
 class DisplayCommunicator:
     supported_firmware_versions = []
     current_data = {}
 
-    def __init__(self, logger: Logger, port: str, event_handler, baudrate: int = 115200, timeout: int = 5) -> None:
+    def __init__(
+        self,
+        logger: Logger,
+        port: str,
+        event_handler,
+        baudrate: int = 115200,
+        timeout: int = 5,
+    ) -> None:
         self.logger = logger
         self.port = port
         self.baudrate = baudrate
         self.timeout = timeout
 
         self.display = TJCClient(port, baudrate, event_handler)
-        self.display.encoding = 'utf-8'
+        self.display.encoding = "utf-8"
 
     async def connect(self):
         await self.display.connect()
@@ -26,10 +34,13 @@ class DisplayCommunicator:
     async def check_valid_version(self):
         version = await self.get_firmware_version()
         if version not in self.supported_firmware_versions:
-            self.logger.error("Unsupported firmware version. Things may not work as expected. Consider updating to a supported version: " + ", ".join(self.supported_firmware_versions))
+            self.logger.error(
+                "Unsupported firmware version. Things may not work as expected. Consider updating to a supported version: "
+                + ", ".join(self.supported_firmware_versions)
+            )
             return False
         return True
-    
+
     def get_current_data(self, path):
         index = 0
         current = self.current_data
@@ -39,7 +50,7 @@ class DisplayCommunicator:
         if index < len(path):
             return None
         return current
-    
+
     async def update_data(self, new_data, data_mapping=None, current_data=None):
         if data_mapping is None:
             data_mapping = self.data_mapping
@@ -60,10 +71,17 @@ class DisplayCommunicator:
                         if mapping_leaf.required_fields is None:
                             formatted = mapping_leaf.format(value)
                         else:
-                            required_values = [self.get_current_data(required_field) for required_field in mapping_leaf.required_fields]
-                            formatted = mapping_leaf.format(value, *required_values)
+                            required_values = [
+                                self.get_current_data(required_field)
+                                for required_field in mapping_leaf.required_fields
+                            ]
+                            formatted = mapping_leaf.format_with_required(value, *required_values)
                         for mapped_key in mapping_leaf.fields:
                             if mapping_leaf.field_type == "txt":
-                                await self.write(f'{mapped_key}.{mapping_leaf.field_type}="{formatted}"')
+                                await self.write(
+                                    f'{mapped_key}.{mapping_leaf.field_type}="{formatted}"'
+                                )
                             else:
-                                await self.write(f'{mapped_key}.{mapping_leaf.field_type}={formatted}')
+                                await self.write(
+                                    f"{mapped_key}.{mapping_leaf.field_type}={formatted}"
+                                )

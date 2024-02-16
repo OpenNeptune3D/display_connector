@@ -5,30 +5,50 @@
 from array import array
 from PIL import ImageColor
 
+
 def parse_thumbnail(img, width, height, default_background) -> str:
     img.thumbnail((width, height))
     pixels = img.load()
     result = ""
     img_size = img.size
-    color16 = array('H')
-    default_background = ImageColor.getcolor(default_background if default_background.startswith('#') else "#" + default_background, "RGB")
+    color16 = array("H")
+    default_background = ImageColor.getcolor(
+        default_background
+        if default_background.startswith("#")
+        else "#" + default_background,
+        "RGB",
+    )
     try:
-        for i in range(img.size[0]): # for every pixel:
+        for i in range(img.size[0]):  # for every pixel:
             for j in range(img.size[1]):
                 pixel_color = pixels[j, i]
                 if pixel_color[3] < 255:
                     alpha = pixel_color[3] / 255
-                    pixel_color = (int(pixel_color[0] * alpha + (1 - alpha) * default_background[0]),
-                                   int(pixel_color[1] * alpha + (1 - alpha) * default_background[1]),
-                                   int(pixel_color[2] * alpha + (1 - alpha) * default_background[2]))
+                    pixel_color = (
+                        int(
+                            pixel_color[0] * alpha + (1 - alpha) * default_background[0]
+                        ),
+                        int(
+                            pixel_color[1] * alpha + (1 - alpha) * default_background[1]
+                        ),
+                        int(
+                            pixel_color[2] * alpha + (1 - alpha) * default_background[2]
+                        ),
+                    )
                 r = pixel_color[0] >> 3
                 g = pixel_color[1] >> 2
                 b = pixel_color[2] >> 3
                 rgb = (r << 11) | (g << 5) | b
                 color16.append(rgb)
         output_data = bytearray(img_size[0] * img_size[1] * 10)
-        ColPic_EncodeStr(color16, img_size[0], img_size[1], output_data,
-                                                    img_size[0] * img_size[1] * 10, 1024)
+        ColPic_EncodeStr(
+            color16,
+            img_size[0],
+            img_size[1],
+            output_data,
+            img_size[0] * img_size[1] * 10,
+            1024,
+        )
 
         j = 0
         for i in range(len(output_data)):
@@ -41,7 +61,10 @@ def parse_thumbnail(img, width, height, default_background) -> str:
 
     return result
 
-def ColPic_EncodeStr(fromcolor16, picw, pich, outputdata: bytearray, outputmaxtsize, colorsmax):
+
+def ColPic_EncodeStr(
+    fromcolor16, picw, pich, outputdata: bytearray, outputmaxtsize, colorsmax
+):
     qty = 0
     temp = 0
     strindex = 0
@@ -72,16 +95,16 @@ def ColPic_EncodeStr(fromcolor16, picw, pich, outputdata: bytearray, outputmaxts
         TempBytes[2] += outputdata[hexindex + 2] >> 6
         TempBytes[3] = outputdata[hexindex + 2] & 63
         TempBytes[0] += 48
-        if chr(TempBytes[0]) == '\\':
+        if chr(TempBytes[0]) == "\\":
             TempBytes[0] = 126
         TempBytes[1] += 48
-        if chr(TempBytes[1]) == '\\':
+        if chr(TempBytes[1]) == "\\":
             TempBytes[1] = 126
         TempBytes[2] += 48
-        if chr(TempBytes[2]) == '\\':
+        if chr(TempBytes[2]) == "\\":
             TempBytes[2] = 126
         TempBytes[3] += 48
-        if chr(TempBytes[3]) == '\\':
+        if chr(TempBytes[3]) == "\\":
             TempBytes[3] = 126
         outputdata[int(strindex)] = TempBytes[0]
         outputdata[int(strindex) + 1] = TempBytes[1]
@@ -93,11 +116,13 @@ def ColPic_EncodeStr(fromcolor16, picw, pich, outputdata: bytearray, outputmaxts
     return qty
 
 
-def ColPicEncode(fromcolor16, picw, pich, outputdata: bytearray, outputmaxtsize, colorsmax):
+def ColPicEncode(
+    fromcolor16, picw, pich, outputdata: bytearray, outputmaxtsize, colorsmax
+):
     l0 = U16HEAD()
     Head0 = ColPicHead3()
     Listu16 = []
-    for i in range(1024):
+    for _ in range(1024):
         Listu16.append(U16HEAD())
 
     ListQty = 0
@@ -112,7 +137,7 @@ def ColPicEncode(fromcolor16, picw, pich, outputdata: bytearray, outputmaxtsize,
         l0 = Listu16[index]
         for i in range(index):
             if l0.qty >= Listu16[i].qty:
-                aListu16 = bListu16 = Listu16.copy()
+                aListu16 = Listu16.copy()
                 for j in range(index - i):
                     Listu16[i + j + 1] = aListu16[i + j]
 
@@ -165,9 +190,15 @@ def ColPicEncode(fromcolor16, picw, pich, outputdata: bytearray, outputmaxtsize,
         outputdata[sizeofColPicHead3 + i * 2 + 1] = (Listu16[i].colo16 & 65280) >> 8
         outputdata[sizeofColPicHead3 + i * 2 + 0] = Listu16[i].colo16 & 255
 
-    enqty = Byte8bitEncode(fromcolor16, sizeofColPicHead3, Head0.ListDataSize >> 1, dotsqty, outputdata,
-                           sizeofColPicHead3 + Head0.ListDataSize,
-                           outputmaxtsize - sizeofColPicHead3 - Head0.ListDataSize)
+    enqty = Byte8bitEncode(
+        fromcolor16,
+        sizeofColPicHead3,
+        Head0.ListDataSize >> 1,
+        dotsqty,
+        outputdata,
+        sizeofColPicHead3 + Head0.ListDataSize,
+        outputmaxtsize - sizeofColPicHead3 - Head0.ListDataSize,
+    )
     Head0.ColorDataSize = enqty
     Head0.PicW = picw
     Head0.PicH = pich
@@ -207,7 +238,15 @@ def ADList0(val, Listu16, ListQty, maxqty):
     return ListQty
 
 
-def Byte8bitEncode(fromcolor16, listu16Index, listqty, dotsqty, outputdata: bytearray, outputdataIndex, decMaxBytesize):
+def Byte8bitEncode(
+    fromcolor16,
+    listu16Index,
+    listqty,
+    dotsqty,
+    outputdata: bytearray,
+    outputdataIndex,
+    decMaxBytesize,
+):
     listu16 = outputdata
     dots = 0
     srcindex = 0
@@ -279,7 +318,6 @@ def Byte8bitEncode(fromcolor16, listu16Index, listqty, dotsqty, outputdata: byte
 
 
 class U16HEAD:
-
     def __init__(self):
         self.colo16 = 0
         self.A0 = 0
@@ -291,7 +329,6 @@ class U16HEAD:
 
 
 class ColPicHead3:
-
     def __init__(self):
         self.encodever = 0
         self.res0 = 0
