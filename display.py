@@ -940,7 +940,7 @@ class DisplayController:
             path = path + "/"
         path += best_thumbnail["relative_path"]
 
-        img = requests.get("http://localhost/server/files/gcodes/" + pathname2url(path))
+        img = requests.get("http://localhost/server/files/gcodes/" + pathname2url(path), timeout=5)
         thumbnail = Image.open(io.BytesIO(img.content))
         background = "29354a"
         if "thumbnails" in self.config:
