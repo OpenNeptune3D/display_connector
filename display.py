@@ -23,6 +23,7 @@ from src.lib_col_pic import parse_thumbnail
 from src.elegoo_neptune4 import MODEL_N4_REGULAR, MODEL_N4_PRO, MODEL_N4_PLUS, MODEL_N4_MAX, Neptune4DisplayCommunicator
 from src.mapping import build_format_filename, filename_regex_wrapper, PAGE_MAIN, PAGE_FILES, PAGE_PREPARE_MOVE, PAGE_PREPARE_TEMP, PAGE_PREPARE_EXTRUDER, PAGE_SETTINGS_TEMPERATURE_SET, PAGE_SETTINGS_ABOUT, PAGE_LEVELING, PAGE_LEVELING_SCREW_ADJUST, PAGE_LEVELING_Z_OFFSET_ADJUST, PAGE_CONFIRM_PRINT, PAGE_PRINTING, PAGE_PRINTING_KAMP, PAGE_PRINTING_PAUSE, PAGE_PRINTING_STOP, PAGE_PRINTING_EMERGENCY_STOP, PAGE_PRINTING_COMPLETE, PAGE_PRINTING_FILAMENT, PAGE_PRINTING_SPEED, PAGE_PRINTING_ADJUST, PAGE_PRINTING_DIALOG_SPEED, PAGE_PRINTING_DIALOG_FLOW, PAGE_OVERLAY_LOADING, format_time
 from src.colors import BACKGROUND_GRAY, BACKGROUND_SUCCESS, BACKGROUND_WARNING, TEXT_SUCCESS, TEXT_ERROR
+from src.wifi import get_wlan0_status, categorize_signal_strength
 
 log_file = os.path.expanduser("~/printer_data/logs/display_connector.log")
 logger = logging.getLogger(__name__)
@@ -255,16 +256,19 @@ class DisplayController:
     async def special_page_handling(self):
         current_page = self._get_current_page()
         if current_page == PAGE_MAIN:
+            has_wifi = self.update_wifi_ui()
+            if self.display.model == MODEL_N4_PRO:
+                self._write('vis out_bedtemp,1')
             if self.display_name_override:
                 display_name = self.display_name_override
                 if display_name == "MODEL_NAME":
                     display_name = self.get_device_name()
-                self._write('xstr 12,20,280,20,1,65535,' + str(BACKGROUND_GRAY) + ',0,1,1,"' + display_name + '"')
+                self._write('xstr 12,20,180,20,1,65535,' + str(BACKGROUND_GRAY) + ',0,1,1,"' + display_name + '"')
             if self.display_name_line_color:
                 self._write('fill 13,47,24,4,' + str(self.display_name_line_color))
 
-            if self.display.model == MODEL_N4_PRO:
-                self._write('vis out_bedtemp,1')
+            self._write(f'xpic {200 if has_wifi else 230},16,30,30,220,200,51')
+
         elif current_page == PAGE_FILES:
             self.show_files_page()
         elif current_page == PAGE_PREPARE_MOVE:
@@ -587,6 +591,18 @@ class DisplayController:
     def update_prepare_extrude_ui(self):
         self._write(f'p[{self._page_id(PAGE_PREPARE_EXTRUDER)}].b[8].txt="{self.extrude_amount}"')
         self._write(f'p[{self._page_id(PAGE_PREPARE_EXTRUDER)}].b[9].txt="{self.extrude_speed}"')
+
+    def update_wifi_ui(self):
+        has_wifi, ssid, rssi = get_wlan0_status()
+        print(has_wifi, ssid, rssi)
+        if not has_wifi:
+            self._write(f'p[{self._page_id(PAGE_MAIN)}].b[0].pic=213')
+            return False
+        if ssid is None:
+            self._write(f'p[{self._page_id(PAGE_MAIN)}].b[0].pic=313')
+        else:
+            self._write(f'p[{self._page_id(PAGE_MAIN)}].b[0].pic={313 + categorize_signal_strength(rssi)}')
+        return True
 
     def send_speed_update(self, speed_type, new_speed):
         if speed_type == "print":
