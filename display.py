@@ -23,7 +23,7 @@ from src.lib_col_pic import parse_thumbnail
 from src.elegoo_neptune4 import MODEL_N4_REGULAR, MODEL_N4_PRO, MODEL_N4_PLUS, MODEL_N4_MAX, Neptune4DisplayCommunicator
 from src.mapping import PAGE_SHUTDOWN_DIALOG, build_format_filename, filename_regex_wrapper, PAGE_MAIN, PAGE_FILES, PAGE_PREPARE_MOVE, PAGE_PREPARE_TEMP, PAGE_PREPARE_EXTRUDER, PAGE_SETTINGS_TEMPERATURE_SET, PAGE_SETTINGS_ABOUT, PAGE_LEVELING, PAGE_LEVELING_SCREW_ADJUST, PAGE_LEVELING_Z_OFFSET_ADJUST, PAGE_CONFIRM_PRINT, PAGE_PRINTING, PAGE_PRINTING_KAMP, PAGE_PRINTING_PAUSE, PAGE_PRINTING_STOP, PAGE_PRINTING_EMERGENCY_STOP, PAGE_PRINTING_COMPLETE, PAGE_PRINTING_FILAMENT, PAGE_PRINTING_SPEED, PAGE_PRINTING_ADJUST, PAGE_PRINTING_DIALOG_SPEED, PAGE_PRINTING_DIALOG_FLOW, PAGE_OVERLAY_LOADING, format_time
 from src.colors import BACKGROUND_DIALOG, BACKGROUND_GRAY, BACKGROUND_SUCCESS, BACKGROUND_WARNING, TEXT_SUCCESS, TEXT_ERROR
-from src.wifi import get_wlan0_status, categorize_signal_strength
+from src.wifi import get_wlan0_status
 
 log_file = os.path.expanduser("~/printer_data/logs/display_connector.log")
 logger = logging.getLogger(__name__)
