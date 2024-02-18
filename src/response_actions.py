@@ -143,7 +143,7 @@ response_actions = {
         1: "toggle_part_light",
         2: "toggle_frame_light",
     },
-    # Printing Speed
+    # Printing Speed dialog
     86: {
         1: "",
     },
@@ -171,6 +171,8 @@ response_actions = {
         5: "zoffset_-",
         7: "page " + PAGE_LIGHTS,
         8: "toggle_filament_sensor",
+        12: "page " + PAGE_PRINTING_FILAMENT,
+        13: "page " + PAGE_PRINTING_SPEED,
     },
     # Printing Speed
     135: {
@@ -183,6 +185,8 @@ response_actions = {
         7: "speed_adjust_-",
         8: "speed_adjust_+",
         9: "speed_reset",
+        12: "page " + PAGE_PRINTING_FILAMENT,
+        13: "page " + PAGE_PRINTING_ADJUST,
     },
     # Leveling Z Offset
     137: {
