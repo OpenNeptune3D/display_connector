@@ -9,7 +9,7 @@ from enum import IntEnum
 TJCTouchDataPayload = namedtuple("Touch", "page_id component_id")
 TJCStringInputPayload = namedtuple("String", "page_id component_id string")
 TJCNumericInputPayload = namedtuple("Numeric", "page_id component_id value")
-
+TJCTouchCoordinatePayload = namedtuple("TouchCoordinate", "x y touch_event")
 
 class EventType(IntEnum):
     TOUCH = 0x65  # Touch event
@@ -132,7 +132,14 @@ class TJCClient(Nextion):
 
     def event_message_handler(self, message):
         typ = message[0]
-        if typ == EventType.TOUCH:  # Touch event
+        if typ == EventType.TOUCH_COORDINATE:
+            self._schedule_event_message_handler(
+                EventType(typ),
+                TJCTouchCoordinatePayload._make(struct.unpack(">HHB", message[1:])),
+            )
+            return
+        elif typ == EventType.TOUCH:  # Touch event
+            print(message)
             self._schedule_event_message_handler(
                 EventType(typ),
                 TJCTouchDataPayload._make(struct.unpack("BB", message[1:])),

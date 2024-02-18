@@ -21,8 +21,8 @@ from src.tjc import EventType
 from src.response_actions import response_actions, input_actions, custom_touch_actions
 from src.lib_col_pic import parse_thumbnail
 from src.elegoo_neptune4 import MODEL_N4_REGULAR, MODEL_N4_PRO, MODEL_N4_PLUS, MODEL_N4_MAX, Neptune4DisplayCommunicator
-from src.mapping import build_format_filename, filename_regex_wrapper, PAGE_MAIN, PAGE_FILES, PAGE_PREPARE_MOVE, PAGE_PREPARE_TEMP, PAGE_PREPARE_EXTRUDER, PAGE_SETTINGS_TEMPERATURE_SET, PAGE_SETTINGS_ABOUT, PAGE_LEVELING, PAGE_LEVELING_SCREW_ADJUST, PAGE_LEVELING_Z_OFFSET_ADJUST, PAGE_CONFIRM_PRINT, PAGE_PRINTING, PAGE_PRINTING_KAMP, PAGE_PRINTING_PAUSE, PAGE_PRINTING_STOP, PAGE_PRINTING_EMERGENCY_STOP, PAGE_PRINTING_COMPLETE, PAGE_PRINTING_FILAMENT, PAGE_PRINTING_SPEED, PAGE_PRINTING_ADJUST, PAGE_PRINTING_DIALOG_SPEED, PAGE_PRINTING_DIALOG_FLOW, PAGE_OVERLAY_LOADING, format_time
-from src.colors import BACKGROUND_GRAY, BACKGROUND_SUCCESS, BACKGROUND_WARNING, TEXT_SUCCESS, TEXT_ERROR
+from src.mapping import PAGE_SHUTDOWN_DIALOG, build_format_filename, filename_regex_wrapper, PAGE_MAIN, PAGE_FILES, PAGE_PREPARE_MOVE, PAGE_PREPARE_TEMP, PAGE_PREPARE_EXTRUDER, PAGE_SETTINGS_TEMPERATURE_SET, PAGE_SETTINGS_ABOUT, PAGE_LEVELING, PAGE_LEVELING_SCREW_ADJUST, PAGE_LEVELING_Z_OFFSET_ADJUST, PAGE_CONFIRM_PRINT, PAGE_PRINTING, PAGE_PRINTING_KAMP, PAGE_PRINTING_PAUSE, PAGE_PRINTING_STOP, PAGE_PRINTING_EMERGENCY_STOP, PAGE_PRINTING_COMPLETE, PAGE_PRINTING_FILAMENT, PAGE_PRINTING_SPEED, PAGE_PRINTING_ADJUST, PAGE_PRINTING_DIALOG_SPEED, PAGE_PRINTING_DIALOG_FLOW, PAGE_OVERLAY_LOADING, format_time
+from src.colors import BACKGROUND_DIALOG, BACKGROUND_GRAY, BACKGROUND_SUCCESS, BACKGROUND_WARNING, TEXT_SUCCESS, TEXT_ERROR
 from src.wifi import get_wlan0_status, categorize_signal_strength
 
 log_file = os.path.expanduser("~/printer_data/logs/display_connector.log")
@@ -317,6 +317,12 @@ class DisplayController:
             self._write("b[3].maxval=200")
         elif current_page == PAGE_PRINTING_DIALOG_FLOW:
             self._write("b[3].maxval=200")
+        elif current_page == PAGE_SHUTDOWN_DIALOG:
+            self._write("fill 20,100,232,240," + str(BACKGROUND_DIALOG))
+            self._write("xstr 24,104,224,50,1,65535,10665,1,1,1,\"Shut Down Host\"")
+            self._write("xstr 24,158,224,50,1,65535,10665,1,1,1,\"Reboot Host\"")
+            self._write("xstr 24,212,224,50,1,65535,10665,1,1,1,\"Reboot Klipper\"")
+            self._write("xstr 24,286,224,50,1,65535,10665,1,1,1,\"Back\"")
 
     def _navigate_to_page(self, page, clear_history = False):
         if len(self.history) == 0 or self.history[-1] != page:
@@ -527,6 +533,20 @@ class DisplayController:
             parts = action.split('_')
             speed = int(parts[2])
             self.send_speed_update("flow", speed)
+        elif action == "reboot_host":
+            logger.info("Rebooting Host")
+            self._go_back()
+            self._navigate_to_page(PAGE_OVERLAY_LOADING)
+            self._loop.create_task(self._send_moonraker_request("machine.reboot"))
+        elif action == "shutdown_host":
+            logger.info("Shutting down Host")
+            self._go_back()
+            self._loop.create_task(self._send_moonraker_request("machine.shutdown"))
+        elif action == "reboot_klipper":
+            logger.info("Rebooting Klipper")
+            self._loop.create_task(self._send_moonraker_request("machine.services.restart", {"service": "klipper"}))
+            self._go_back()
+            self._navigate_to_page(PAGE_OVERLAY_LOADING)
 
     def _write(self, data, forced = False):
         if self.is_blocking_serial and not forced:
@@ -594,9 +614,8 @@ class DisplayController:
 
     def update_wifi_ui(self):
         has_wifi, ssid, rssi = get_wlan0_status()
-        print(has_wifi, ssid, rssi)
         if not has_wifi:
-            self._write(f'p[{self._page_id(PAGE_MAIN)}].b[0].pic=213')
+            self._write(f'p[{self._page_id(PAGE_MAIN)}].b[0].pic=214')
             return False
         if ssid is None:
             self._write(f'p[{self._page_id(PAGE_MAIN)}].b[0].pic=313')
@@ -835,7 +854,14 @@ class DisplayController:
             
     def handle_custom_touch(self, x, y):
         if self._get_current_page() in custom_touch_actions:
-            pass
+            print(x, y)
+            actions = custom_touch_actions[self._get_current_page()]
+            for key in actions:
+                print(key)
+                min_x, min_y, max_x, max_y = key
+                if min_x < x and x < max_x and min_y < y and y < max_y:
+                    self.execute_action(actions[key])
+                    return
 
     async def display_event_handler(self, type, data):
         if type == EventType.TOUCH:

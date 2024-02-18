@@ -3,6 +3,7 @@ import time
 
 PAGE_MAIN = "main"
 PAGE_FILES = "files"
+PAGE_SHUTDOWN_DIALOG = "shutdown_dialog"
 
 PAGE_PREPARE_MOVE = "prepare_move"
 PAGE_PREPARE_TEMP = "prepare_temp"
