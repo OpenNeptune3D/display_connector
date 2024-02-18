@@ -611,16 +611,16 @@ class DisplayController:
     def update_prepare_extrude_ui(self):
         self._write(f'p[{self._page_id(PAGE_PREPARE_EXTRUDER)}].b[8].txt="{self.extrude_amount}"')
         self._write(f'p[{self._page_id(PAGE_PREPARE_EXTRUDER)}].b[9].txt="{self.extrude_speed}"')
-
+        
     def update_wifi_ui(self):
-        has_wifi, ssid, rssi = get_wlan0_status()
+        has_wifi, ssid, rssi_category = get_wlan0_status()
         if not has_wifi:
             self._write(f'p[{self._page_id(PAGE_MAIN)}].b[0].pic=214')
             return False
         if ssid is None:
             self._write(f'p[{self._page_id(PAGE_MAIN)}].b[0].pic=313')
         else:
-            self._write(f'p[{self._page_id(PAGE_MAIN)}].b[0].pic={313 + categorize_signal_strength(rssi)}')
+            self._write(f'p[{self._page_id(PAGE_MAIN)}].b[0].pic={313 + rssi_category}')
         return True
 
     def send_speed_update(self, speed_type, new_speed):
