@@ -257,7 +257,7 @@ class ElegooDisplayMapper(Mapper):
                     MappingLeaf(
                         [build_accessor(self.map_page(PAGE_PRINTING), "zvalue")],
                         required_fields=[["print_stats", "info", "total_layer"]],
-                        formatter=lambda current, total: f"{current:.0f}/{total:.0f}",
+                        formatter=lambda current, total: f"{current:.0f}/{total:.0f}" if current is not None and total is not None else '0/0',
                     )
                 ],
                 "total_layer": [MappingLeaf([])],
