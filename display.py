@@ -84,7 +84,7 @@ class DisplayController:
         self.connected = False
 
 
-        self.display = Neptune4DisplayCommunicator(logger, self.get_printer_model_from_file(), event_handler=self.display_event_handler)
+        self.display = Neptune4DisplayCommunicator(logger, self.get_printer_model(), event_handler=self.display_event_handler)
         self.display.mapper.set_z_display(self.z_display)
 
         self.part_light_state = False
@@ -193,13 +193,15 @@ class DisplayController:
             self.extrude_amount = prepare.getint("extrude_amount", fallback=50)
             self.extrude_speed = prepare.getint("extrude_speed", fallback=5)
 
-    def get_printer_model_from_file(self):
+    def get_printer_model(self):
+        if "general" in self.config:
+            if "printer_model" in self.config["general"]:
+                return self.config["general"]["printer_model"]
         try:
             with open('/boot/.OpenNept4une.txt', 'r') as file:
                 for line in file:
                     if line.startswith(tuple(SUPPORTED_PRINTERS)):
                         model_part = line.split('-')[0].strip()
-                        logger.info(f"Extracted Model: {model_part}")
                         return model_part
         except FileNotFoundError:
             logger.error("File not found")

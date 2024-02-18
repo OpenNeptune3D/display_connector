@@ -101,13 +101,17 @@ class Neptune4DisplayCommunicator(ElegooDisplayCommunicator):
         self.mapper = self.get_mapper(model)
 
     def get_mapper(self, model: str) -> Neptune4Mapper:
-        if model == MODEL_N4_REGULAR:
+        if model.lower() == MODEL_N4_REGULAR.lower():
+            self.model = MODEL_N4_REGULAR
             return Neptune4Mapper()
-        elif model == MODEL_N4_PRO:
+        elif model.lower() == MODEL_N4_PRO.lower():
+            self.model = MODEL_N4_PRO
             return Neptune4ProMapper()
-        elif model == MODEL_N4_PLUS:
+        elif model.lower() == MODEL_N4_PLUS.lower():
+            self.model = MODEL_N4_PLUS
             return Neptune4PlusMapper()
-        elif model == MODEL_N4_MAX:
+        elif model.lower() == MODEL_N4_MAX.lower():
+            self.model = MODEL_N4_MAX
             return Neptune4MaxMapper()
         else:
             self.logger.error(
