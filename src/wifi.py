@@ -1,10 +1,9 @@
-import subprocess
+import subprocess  # nosec
 
 def get_wlan0_status():
     try:
         # Get the SSID
-        ssid_output = subprocess.check_output(
-            ['nmcli', '-t', '-f', 'active,ssid', 'dev', 'wifi']).decode('utf-8')
+        ssid_output = subprocess.check_output(['nmcli', '-t', '-f', 'active,ssid', 'dev', 'wifi']).decode('utf-8')  # nosec B603, B607
         if len(ssid_output) == 0:
             return False, None, None
         ssid = None
@@ -14,8 +13,7 @@ def get_wlan0_status():
                 break
 
         # Get the signal strength
-        rssi_output = subprocess.check_output(
-            ['nmcli', '-f', 'in-use,signal', '-t', 'dev', 'wifi']).decode('utf-8')
+        rssi_output = subprocess.check_output(['nmcli', '-f', 'in-use,signal', '-t', 'dev', 'wifi']).decode('utf-8')  # nosec B603, B607
         rssi = None
         for line in rssi_output.strip().split('\n'):
             if line.startswith('*:'):
