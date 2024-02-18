@@ -78,7 +78,7 @@ class TJCProtocol(NextionProtocol):
         was_keyboard_input = False
         buffer_len = len(self.buffer)
         if buffer_len < expected_packet_length:
-            if buffer_len == 5 and self.buffer[0] == 0x72:
+            if buffer_len == 5 and (self.buffer[0] == 0x72 or self.buffer[0] == 0x71):
                 expected_packet_length = 5
             else:
                 return None, was_keyboard_input
