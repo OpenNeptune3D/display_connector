@@ -615,12 +615,12 @@ class DisplayController:
     def update_wifi_ui(self):
         has_wifi, ssid, rssi_category = get_wlan0_status()
         if not has_wifi:
-            self._write(f'p[{self._page_id(PAGE_MAIN)}].b[0].pic=214')
+            self._write(f'picq 230,0,42,42,214')
             return False
         if ssid is None:
-            self._write(f'p[{self._page_id(PAGE_MAIN)}].b[0].pic=313')
+            self._write(f'picq 230,0,42,42,313')
         else:
-            self._write(f'p[{self._page_id(PAGE_MAIN)}].b[0].pic={313 + rssi_category}')
+            self._write(f'picq 230,0,42,42,{313 + rssi_category}')
         return True
 
     def send_speed_update(self, speed_type, new_speed):
