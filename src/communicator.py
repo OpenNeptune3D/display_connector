@@ -6,15 +6,23 @@ class DisplayCommunicator:
     supported_firmware_versions = []
     current_data = {}
 
+    ips = "--"
+
     def __init__(
         self,
         logger: Logger,
+        model: str,
         port: str,
         event_handler,
         baudrate: int = 115200,
         timeout: int = 5,
     ) -> None:
+        self.display_name_override = None
+        self.display_name_line_color = None
+        self.z_display = "mm"
+
         self.logger = logger
+        self.model = model
         self.port = port
         self.baudrate = baudrate
         self.timeout = timeout
@@ -40,6 +48,9 @@ class DisplayCommunicator:
             )
             return False
         return True
+    
+    def get_device_name(self):
+        return self.model
 
     def get_current_data(self, path):
         index = 0
@@ -50,6 +61,9 @@ class DisplayCommunicator:
         if index < len(path):
             return None
         return current
+    
+    async def navigate_to(self, page_id):
+        await self.write(f"page {page_id}")
 
     async def update_data(self, new_data, data_mapping=None, current_data=None):
         if data_mapping is None:
