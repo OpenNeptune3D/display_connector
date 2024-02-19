@@ -89,3 +89,4 @@ class ConfigHandler(ConfigParser):
 
             with open(self.file_path, "w") as configfile:
                 self.write(configfile)
+

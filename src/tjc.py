@@ -139,7 +139,6 @@ class TJCClient(Nextion):
             )
             return
         elif typ == EventType.TOUCH:  # Touch event
-            print(message)
             self._schedule_event_message_handler(
                 EventType(typ),
                 TJCTouchDataPayload._make(struct.unpack("BB", message[1:])),

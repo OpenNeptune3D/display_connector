@@ -78,10 +78,11 @@ class Neptune4ProMapper(Neptune4Mapper):
         }
 
 
+
 class Neptune4PlusMapper(Neptune4Mapper):
     pass
 
-
+  
 class Neptune4MaxMapper(Neptune4Mapper):
     pass
 
