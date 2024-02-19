@@ -74,5 +74,3 @@ echo "Allowing Moonraker to control display service"
 grep -qxF 'display' $MOONRAKER_ASVC || echo 'display' >> $MOONRAKER_ASVC
 
 sudo service moonraker restart
-
-sudo service moonraker restart 

@@ -1,0 +1,3 @@
+[bandit]
+targets = display.py,src
+skips = B603,B604,B607

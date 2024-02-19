@@ -1,11 +1,12 @@
-import configparser
 import json
 import sys
 import logging
 import pathlib
 import requests
 import re
-import os, os.path
+import os
+import os.path
+import time
 import io
 import asyncio
 import traceback
@@ -14,14 +15,15 @@ from urllib.request import pathname2url
 from src.config import TEMP_DEFAULTS, ConfigHandler
 from watchdog.observers import Observer
 from watchdog.events import PatternMatchingEventHandler
-from math import ceil, floor
+from math import ceil
 
-from src.tjc import TJCClient, EventType
+from src.tjc import EventType
 from src.response_actions import response_actions, input_actions, custom_touch_actions
 from src.lib_col_pic import parse_thumbnail
-from src.elegoo_neptune4 import *
-from src.mapping import *
-from src.colors import *
+from src.elegoo_neptune4 import MODEL_N4_REGULAR, MODEL_N4_PRO, MODEL_N4_PLUS, MODEL_N4_MAX, Neptune4DisplayCommunicator
+from src.mapping import PAGE_SHUTDOWN_DIALOG, build_format_filename, filename_regex_wrapper, PAGE_MAIN, PAGE_FILES, PAGE_PREPARE_MOVE, PAGE_PREPARE_TEMP, PAGE_PREPARE_EXTRUDER, PAGE_SETTINGS_TEMPERATURE_SET, PAGE_SETTINGS_ABOUT, PAGE_LEVELING, PAGE_LEVELING_SCREW_ADJUST, PAGE_LEVELING_Z_OFFSET_ADJUST, PAGE_CONFIRM_PRINT, PAGE_PRINTING, PAGE_PRINTING_KAMP, PAGE_PRINTING_PAUSE, PAGE_PRINTING_STOP, PAGE_PRINTING_EMERGENCY_STOP, PAGE_PRINTING_COMPLETE, PAGE_PRINTING_FILAMENT, PAGE_PRINTING_SPEED, PAGE_PRINTING_ADJUST, PAGE_PRINTING_DIALOG_SPEED, PAGE_PRINTING_DIALOG_FLOW, PAGE_OVERLAY_LOADING, format_time
+from src.colors import BACKGROUND_DIALOG, BACKGROUND_GRAY, BACKGROUND_SUCCESS, BACKGROUND_WARNING, TEXT_SUCCESS, TEXT_ERROR
+from src.wifi import get_wlan0_status
 
 log_file = os.path.expanduser("~/printer_data/logs/display_connector.log")
 logger = logging.getLogger(__name__)
@@ -83,7 +85,7 @@ class DisplayController:
         self.connected = False
 
 
-        self.display = Neptune4DisplayCommunicator(logger, self.get_printer_model_from_file(), event_handler=self.display_event_handler)
+        self.display = Neptune4DisplayCommunicator(logger, self.get_printer_model(), event_handler=self.display_event_handler)
         self.display.mapper.set_z_display(self.z_display)
 
         self.part_light_state = False
@@ -192,13 +194,15 @@ class DisplayController:
             self.extrude_amount = prepare.getint("extrude_amount", fallback=50)
             self.extrude_speed = prepare.getint("extrude_speed", fallback=5)
 
-    def get_printer_model_from_file(self):
+    def get_printer_model(self):
+        if "general" in self.config:
+            if "printer_model" in self.config["general"]:
+                return self.config["general"]["printer_model"]
         try:
             with open('/boot/.OpenNept4une.txt', 'r') as file:
                 for line in file:
                     if line.startswith(tuple(SUPPORTED_PRINTERS)):
                         model_part = line.split('-')[0].strip()
-                        logger.info(f"Extracted Model: {model_part}")
                         return model_part
         except FileNotFoundError:
             logger.error("File not found")
@@ -252,16 +256,19 @@ class DisplayController:
     async def special_page_handling(self):
         current_page = self._get_current_page()
         if current_page == PAGE_MAIN:
+            has_wifi = self.update_wifi_ui()
+            if self.display.model == MODEL_N4_PRO:
+                self._write('vis out_bedtemp,1')
             if self.display_name_override:
                 display_name = self.display_name_override
                 if display_name == "MODEL_NAME":
                     display_name = self.get_device_name()
-                self._write('xstr 12,20,280,20,1,65535,' + str(BACKGROUND_GRAY) + ',0,1,1,"' + display_name + '"')
+                self._write('xstr 12,20,180,20,1,65535,' + str(BACKGROUND_GRAY) + ',0,1,1,"' + display_name + '"')
             if self.display_name_line_color:
                 self._write('fill 13,47,24,4,' + str(self.display_name_line_color))
 
-            if self.display.model == MODEL_N4_PRO:
-                self._write(f'vis out_bedtemp,1')
+            self._write(f'xpic {200 if has_wifi else 230},16,30,30,220,200,51')
+
         elif current_page == PAGE_FILES:
             self.show_files_page()
         elif current_page == PAGE_PREPARE_MOVE:
@@ -281,7 +288,7 @@ class DisplayController:
             self._write("move printvalue,13,267,13,267,0,10")
             self._write("vis b[16],0")
         elif current_page == PAGE_PRINTING_COMPLETE:
-            self._write(f'b[4].txt="Print Completed!"')
+            self._write('b[4].txt="Print Completed!"')
             self._write(f'b[3].txt="{build_format_filename()(self.current_filename)}"')
             self._write(f'b[5].txt="Time: {format_time(self.current_print_duration)}"')
         elif current_page == PAGE_PRINTING_FILAMENT:
@@ -310,6 +317,12 @@ class DisplayController:
             self._write("b[3].maxval=200")
         elif current_page == PAGE_PRINTING_DIALOG_FLOW:
             self._write("b[3].maxval=200")
+        elif current_page == PAGE_SHUTDOWN_DIALOG:
+            self._write("fill 20,100,232,240," + str(BACKGROUND_DIALOG))
+            self._write("xstr 24,104,224,50,1,65535,10665,1,1,1,\"Shut Down Host\"")
+            self._write("xstr 24,158,224,50,1,65535,10665,1,1,1,\"Reboot Host\"")
+            self._write("xstr 24,212,224,50,1,65535,10665,1,1,1,\"Reboot Klipper\"")
+            self._write("xstr 24,286,224,50,1,65535,10665,1,1,1,\"Back\"")
 
     def _navigate_to_page(self, page, clear_history = False):
         if len(self.history) == 0 or self.history[-1] != page:
@@ -372,10 +385,8 @@ class DisplayController:
                 self._navigate_to_page(PAGE_PRINTING_PAUSE)
         elif action == "pause_print_confirm":
             self._go_back()
-            logger.info("Pausing print")
-        elif action == "resume_print":
-            self._go_back()
             self._loop.create_task(self._send_moonraker_request("printer.print.pause"))
+            logger.info("Pausing print")
         elif action == "stop_print":
             self._go_back()
             self._navigate_to_page(PAGE_OVERLAY_LOADING)
@@ -396,10 +407,10 @@ class DisplayController:
             parts = action.split('_')
             direction = parts[2]
             current_temp = self.printing_target_temps[self.printing_selected_heater]
-            self.send_gcode(f"SET_HEATER_TEMPERATURE HEATER=" + self.printing_selected_heater + " TARGET=" + 
+            self.send_gcode("SET_HEATER_TEMPERATURE HEATER=" + self.printing_selected_heater + " TARGET=" + 
                             str(current_temp + (int(direction + self.printing_selected_temp_increment) * (1 if direction == '+' else -1))))
         elif action == "temp_reset":
-            self.send_gcode(f"SET_HEATER_TEMPERATURE HEATER=" + self.printing_selected_heater + " TARGET=0")
+            self.send_gcode("SET_HEATER_TEMPERATURE HEATER=" + self.printing_selected_heater + " TARGET=0")
         elif action.startswith("speed_type_"):
             parts = action.split('_')
             self.printing_selected_speed_type = parts[2]
@@ -443,7 +454,7 @@ class DisplayController:
             parts = action.split('_')
             target = parts[-1]
             heater = "_".join(parts[2:-1])
-            self.send_gcode(f"SET_HEATER_TEMPERATURE HEATER=" + heater + " TARGET=" + target)
+            self.send_gcode("SET_HEATER_TEMPERATURE HEATER=" + heater + " TARGET=" + target)
         elif action.startswith("set_preset_temp"):
             parts = action.split('_')
             material = parts[3].lower()
@@ -522,6 +533,20 @@ class DisplayController:
             parts = action.split('_')
             speed = int(parts[2])
             self.send_speed_update("flow", speed)
+        elif action == "reboot_host":
+            logger.info("Rebooting Host")
+            self._go_back()
+            self._navigate_to_page(PAGE_OVERLAY_LOADING)
+            self._loop.create_task(self._send_moonraker_request("machine.reboot"))
+        elif action == "shutdown_host":
+            logger.info("Shutting down Host")
+            self._go_back()
+            self._loop.create_task(self._send_moonraker_request("machine.shutdown"))
+        elif action == "reboot_klipper":
+            logger.info("Rebooting Klipper")
+            self._loop.create_task(self._send_moonraker_request("machine.services.restart", {"service": "klipper"}))
+            self._go_back()
+            self._navigate_to_page(PAGE_OVERLAY_LOADING)
 
     def _write(self, data, forced = False):
         if self.is_blocking_serial and not forced:
@@ -586,6 +611,17 @@ class DisplayController:
     def update_prepare_extrude_ui(self):
         self._write(f'p[{self._page_id(PAGE_PREPARE_EXTRUDER)}].b[8].txt="{self.extrude_amount}"')
         self._write(f'p[{self._page_id(PAGE_PREPARE_EXTRUDER)}].b[9].txt="{self.extrude_speed}"')
+        
+    def update_wifi_ui(self):
+        has_wifi, ssid, rssi_category = get_wlan0_status()
+        if not has_wifi:
+            self._write(f'p[{self._page_id(PAGE_MAIN)}].b[0].pic=214')
+            return False
+        if ssid is None:
+            self._write(f'p[{self._page_id(PAGE_MAIN)}].b[0].pic=313')
+        else:
+            self._write(f'p[{self._page_id(PAGE_MAIN)}].b[0].pic={313 + rssi_category}')
+        return True
 
     def send_speed_update(self, speed_type, new_speed):
         if speed_type == "print":
@@ -721,7 +757,9 @@ class DisplayController:
         self.handle_status_update(data)
 
     async def _send_moonraker_request(
-        self, method, params={}):
+        self, method, params=None):
+        if params is None:
+            params = {}
         message = self._make_rpc_msg(method, **params)
         fut = self._loop.create_future()
         self.pending_reqs[message["id"]] = fut
@@ -816,7 +854,14 @@ class DisplayController:
             
     def handle_custom_touch(self, x, y):
         if self._get_current_page() in custom_touch_actions:
-            pass
+            print(x, y)
+            actions = custom_touch_actions[self._get_current_page()]
+            for key in actions:
+                print(key)
+                min_x, min_y, max_x, max_y = key
+                if min_x < x and x < max_x and min_y < y and y < max_y:
+                    self.execute_action(actions[key])
+                    return
 
     async def display_event_handler(self, type, data):
         if type == EventType.TOUCH:
@@ -939,7 +984,7 @@ class DisplayController:
             path = path + "/"
         path += best_thumbnail["relative_path"]
 
-        img = requests.get("http://localhost/server/files/gcodes/" + pathname2url(path))
+        img = requests.get("http://localhost/server/files/gcodes/" + pathname2url(path), timeout=5)
         thumbnail = Image.open(io.BytesIO(img.content))
         background = "29354a"
         if "thumbnails" in self.config:
@@ -970,10 +1015,9 @@ class DisplayController:
         if "print_stats" in new_data:
             if "filename" in new_data["print_stats"]:
                 filename = new_data["print_stats"]["filename"]
-                if filename != self.current_filename:
-                    self.current_filename = filename
-                    if filename is not None and filename != "":
-                        self._loop.create_task(self.load_thumbnail_for_page(self.current_filename, "19"))
+                self.current_filename = filename
+                if filename is not None and filename != "":
+                    self._loop.create_task(self.load_thumbnail_for_page(self.current_filename, "19"))
             if "state" in new_data["print_stats"]:
                 state = new_data["print_stats"]["state"]
                 self.current_state = state
@@ -984,13 +1028,13 @@ class DisplayController:
                         self._write(f'p[{self._page_id(PAGE_PRINTING)}].b[44].pic=68')
                     elif state == "paused":
                         self._write(f'p[{self._page_id(PAGE_PRINTING)}].b[44].pic=69')
-                    if current_page == None or current_page not in PRINTING_PAGES:
+                    if current_page is None or current_page not in PRINTING_PAGES:
                         self._navigate_to_page(PAGE_PRINTING, clear_history=True)
                 elif state == "complete":
-                    if current_page == None or current_page != PAGE_PRINTING_COMPLETE:
+                    if current_page is None or current_page != PAGE_PRINTING_COMPLETE:
                         self._navigate_to_page(PAGE_PRINTING_COMPLETE)
                 else:
-                    if current_page == None or current_page in PRINTING_PAGES or current_page == PAGE_PRINTING_COMPLETE:
+                    if current_page is None or current_page in PRINTING_PAGES or current_page == PAGE_PRINTING_COMPLETE or current_page == PAGE_OVERLAY_LOADING:
                         self._navigate_to_page(PAGE_MAIN, clear_history=True)
 
             if "print_duration" in new_data["print_stats"]:
@@ -1062,41 +1106,39 @@ class DisplayController:
         self._write("vis b[7],0")
         self._write("vis b[8],1")
         self._write("fill 0,110,320,290,10665")
-        green = 26347
-        red = 10665
         self._write("xstr 12,320,100,20,1,65535,10665,1,1,1,\"front left\"")
-        self.draw_screw_level_info_at("12,340,100,20", self.screw_levels["front left"], green, red)
+        self.draw_screw_level_info_at("12,340,100,20", self.screw_levels["front left"])
 
         self._write("xstr 170,320,100,20,1,65535,10665,1,1,1,\"front right\"")
-        self.draw_screw_level_info_at("170,340,100,20", self.screw_levels["front right"], green, red)
+        self.draw_screw_level_info_at("170,340,100,20", self.screw_levels["front right"])
 
         self._write("xstr 170,120,100,20,1,65535,10665,1,1,1,\"rear right\"")
-        self.draw_screw_level_info_at("170,140,100,20", self.screw_levels["rear right"], green, red)
+        self.draw_screw_level_info_at("170,140,100,20", self.screw_levels["rear right"])
 
         self._write("xstr 12,120,100,20,1,65535,10665,1,1,1,\"rear left\"")
-        self.draw_screw_level_info_at("12,140,100,20", self.screw_levels["rear left"], green, red)
+        self.draw_screw_level_info_at("12,140,100,20", self.screw_levels["rear left"])
 
         if 'center right' in self.screw_levels:
             self._write("xstr 12,220,100,30,1,65535,10665,1,1,1,\"center\\rright\"")
-            self.draw_screw_level_info_at("170,240,100,20", self.screw_levels["center right"], green, red)
+            self.draw_screw_level_info_at("170,240,100,20", self.screw_levels["center right"])
         if 'center left' in self.screw_levels:
             self._write("xstr 12,120,100,20,1,65535,10665,1,1,1,\"center\\rleft\"")
-            self.draw_screw_level_info_at("12,240,100,20", self.screw_levels["center left"], green, red)
+            self.draw_screw_level_info_at("12,240,100,20", self.screw_levels["center left"])
 
         self._write("xstr 96,215,100,50,1,65535,15319,1,1,1,\"Retry\"")
 
-    def draw_screw_level_info_at(self, position, level, green, red):
+    def draw_screw_level_info_at(self, position, level):
         if level == "base":
             self._write(f"xstr {position},0,65535,10665,1,1,1,\"base\"")
         else:
-            color = green if int(level[-2:]) < 5 else red
+            color = TEXT_SUCCESS if int(level[-2:]) < 5 else TEXT_ERROR
             self._write(f"xstr {position},0,{color},10665,1,1,1,\"{level}\"")
 
     async def handle_screw_leveling(self):
         self.leveling_mode = "screw"
         self.screw_levels = {}
         self.screw_probe_count = 0
-        response = await self._send_moonraker_request("printer.gcode.script", {"script": "BED_LEVEL_SCREWS_TUNE"})
+        await self._send_moonraker_request("printer.gcode.script", {"script": "BED_LEVEL_SCREWS_TUNE"})
         self.draw_completed_screw_leveling()
 
     def draw_initial_zprobe_leveling(self):
@@ -1117,11 +1159,11 @@ class DisplayController:
         self.z_probe_step = "0.1"
         self.z_probe_distance = "0.0"
         self._navigate_to_page(PAGE_OVERLAY_LOADING)
-        response = await self._send_moonraker_request("printer.gcode.script", {"script": "CALIBRATE_PROBE_Z_OFFSET"})
+        await self._send_moonraker_request("printer.gcode.script", {"script": "CALIBRATE_PROBE_Z_OFFSET"})
         self._go_back()
 
     def draw_kamp_page(self):
-        self._write(f'fill 0,45,272,340,10665')
+        self._write('fill 0,45,272,340,10665')
         self._write('xstr 0,0,272,50,1,65535,10665,1,1,1,"Creating Bed Mesh"')
         max_size = 264 # display width - 4px padding
         x_probes = self.bed_leveling_counts[0]
