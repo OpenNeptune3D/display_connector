@@ -884,9 +884,9 @@ class DisplayController:
                     total_time = new_data["print_stats"]["print_duration"] / new_data["display_status"]["progress"]
                     self._loop.create_task(self.display.update_time_remaining(format_time(total_time - new_data["print_stats"]["print_duration"])))
 
-        if "output_pin Part_Light" in new_data:
+        if "output_pin Part_Light" in new_data and new_data["output_pin Part_Light"]["value"] != None:
             self.part_light_state = int(new_data["output_pin Part_Light"]["value"]) == 1
-        if "output_pin Frame_Light" in new_data:
+        if "output_pin Frame_Light" in new_data and new_data["output_pin Frame_Light"]["value"] != None:
             self.part_light_state = int(new_data["output_pin Frame_Light"]["value"]) == 1
         if "fan" in new_data:
             self.fan_state = float(new_data["fan"]["speed"]) > 0
