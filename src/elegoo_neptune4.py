@@ -7,6 +7,8 @@ MODEL_N4_PRO = "N4Pro"
 MODEL_N4_PLUS = "N4Plus"
 MODEL_N4_MAX = "N4Max"
 
+MODELS_N4 = [MODEL_N4_REGULAR, MODEL_N4_PRO, MODEL_N4_PLUS, MODEL_N4_MAX]
+
 
 class Neptune4Mapper(ElegooDisplayMapper):
     pass
@@ -82,7 +84,7 @@ class Neptune4ProMapper(Neptune4Mapper):
 class Neptune4PlusMapper(Neptune4Mapper):
     pass
 
-  
+
 class Neptune4MaxMapper(Neptune4Mapper):
     pass
 
@@ -93,11 +95,11 @@ class Neptune4DisplayCommunicator(ElegooDisplayCommunicator):
         logger: Logger,
         model: str,
         event_handler,
-        port: str = "/dev/ttyS1",
+        port: str,
         baudrate: int = 115200,
         timeout: int = 5,
     ) -> None:
-        super().__init__(logger, model, port, event_handler, baudrate, timeout)
+        super().__init__(logger, model, port if port else "/dev/ttyS1", event_handler, baudrate, timeout)
         self.mapper = self.get_mapper(model)
 
         self.has_two_beds = model.lower() == MODEL_N4_PRO.lower()
@@ -121,7 +123,7 @@ class Neptune4DisplayCommunicator(ElegooDisplayCommunicator):
             )
             self.model = MODEL_N4_REGULAR
             return Neptune4Mapper()
-        
+
     def get_device_name(self):
         model_map = {
             MODEL_N4_REGULAR: "Neptune 4",

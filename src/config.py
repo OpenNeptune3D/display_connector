@@ -28,6 +28,12 @@ class ConfigHandler(ConfigParser):
         with open(self.file_path, "w") as configfile:
             self.write(configfile)
 
+    def safe_get(self, section, key, default=None):
+        try:
+            return self.get(section, key)
+        except:
+            return default
+
     def initialize_config_file(self):
         if not os.path.exists(self.file_path):
             self.logger.info("Creating config file")
@@ -89,4 +95,3 @@ class ConfigHandler(ConfigParser):
 
             with open(self.file_path, "w") as configfile:
                 self.write(configfile)
-

@@ -20,7 +20,10 @@ from math import ceil
 from src.tjc import EventType
 from src.response_actions import response_actions, input_actions, custom_touch_actions
 from src.lib_col_pic import parse_thumbnail
-from src.elegoo_neptune4 import MODEL_N4_REGULAR, MODEL_N4_PRO, MODEL_N4_PLUS, MODEL_N4_MAX, Neptune4DisplayCommunicator
+from src.communicator import DisplayCommunicator
+from src.elegoo_neptune4 import MODEL_N4_REGULAR, MODEL_N4_PRO, MODEL_N4_PLUS, MODEL_N4_MAX, MODELS_N4, Neptune4DisplayCommunicator
+from src.elegoo_neptune3 import MODEL_N3_REGULAR, MODEL_N3_PRO, MODEL_N3_PLUS, MODEL_N3_MAX, MODELS_N3, Neptune3DisplayCommunicator
+from src.elegoo_custom import MODEL_CUSTOM, CustomDisplayCommunicator
 from src.mapping import PAGE_SHUTDOWN_DIALOG, build_format_filename, filename_regex_wrapper, PAGE_MAIN, PAGE_FILES, PAGE_PREPARE_MOVE, PAGE_PREPARE_TEMP, PAGE_PREPARE_EXTRUDER, PAGE_SETTINGS_TEMPERATURE_SET, PAGE_SETTINGS_ABOUT, PAGE_LEVELING, PAGE_LEVELING_SCREW_ADJUST, PAGE_LEVELING_Z_OFFSET_ADJUST, PAGE_CONFIRM_PRINT, PAGE_PRINTING, PAGE_PRINTING_KAMP, PAGE_PRINTING_PAUSE, PAGE_PRINTING_STOP, PAGE_PRINTING_EMERGENCY_STOP, PAGE_PRINTING_COMPLETE, PAGE_PRINTING_FILAMENT, PAGE_PRINTING_SPEED, PAGE_PRINTING_ADJUST, PAGE_PRINTING_DIALOG_SPEED, PAGE_PRINTING_DIALOG_FLOW, PAGE_OVERLAY_LOADING, format_time
 from src.colors import BACKGROUND_DIALOG, BACKGROUND_GRAY, BACKGROUND_SUCCESS, BACKGROUND_WARNING, TEXT_SUCCESS, TEXT_ERROR
 from src.wifi import get_wlan0_status
@@ -72,6 +75,15 @@ SUPPORTED_PRINTERS = [
     MODEL_N4_MAX
 ]
 
+def get_communicator_for_model(model) -> DisplayCommunicator:
+    if model == MODEL_CUSTOM:
+        return CustomDisplayCommunicator
+    elif model in MODELS_N4:
+        return Neptune4DisplayCommunicator
+    elif model in MODELS_N3:
+        return Neptune3DisplayCommunicator
+
+
 SOCKET_LIMIT = 20 * 1024 * 1024
 class DisplayController:
     last_config_change = 0
@@ -81,8 +93,8 @@ class DisplayController:
         self._handle_config()
         self.connected = False
 
-
-        self.display = Neptune4DisplayCommunicator(logger, self.get_printer_model(), event_handler=self.display_event_handler)
+        printer_model = self.get_printer_model()
+        self.display = get_communicator_for_model(printer_model)(logger, printer_model, event_handler=self.display_event_handler, port=self.config.safe_get("general", "serial_port"))
         self._handle_display_config()
 
         self.part_light_state = False
