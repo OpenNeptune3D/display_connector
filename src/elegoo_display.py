@@ -1,3 +1,4 @@
+import asyncio
 from src.communicator import DisplayCommunicator
 from src.mapping import Mapper, MappingLeaf, build_accessor, build_format_filename, PAGE_MAIN, PAGE_FILES, PAGE_PREPARE_MOVE, PAGE_PREPARE_TEMP, PAGE_PREPARE_EXTRUDER, PAGE_SETTINGS, PAGE_SETTINGS_LANGUAGE, PAGE_SETTINGS_TEMPERATURE, PAGE_SETTINGS_TEMPERATURE_SET, PAGE_SETTINGS_ABOUT, PAGE_SETTINGS_ADVANCED, PAGE_LEVELING, PAGE_LEVELING_SCREW_ADJUST, PAGE_LEVELING_Z_OFFSET_ADJUST, PAGE_CONFIRM_PRINT, PAGE_PRINTING, PAGE_PRINTING_KAMP, PAGE_PRINTING_PAUSE, PAGE_PRINTING_STOP, PAGE_PRINTING_EMERGENCY_STOP, PAGE_PRINTING_COMPLETE, PAGE_PRINTING_FILAMENT, PAGE_PRINTING_SPEED, PAGE_PRINTING_ADJUST, PAGE_PRINTING_FILAMENT_RUNOUT, PAGE_PRINTING_DIALOG_SPEED, PAGE_PRINTING_DIALOG_FAN, PAGE_PRINTING_DIALOG_FLOW, PAGE_OVERLAY_LOADING, PAGE_LIGHTS, PAGE_SHUTDOWN_DIALOG, format_temp, format_time, format_percent
 from src.colors import BACKGROUND_DIALOG, BACKGROUND_GRAY, TEXT_ERROR, TEXT_SUCCESS, TEXT_WARNING
@@ -268,6 +269,8 @@ class ElegooDisplayMapper(Mapper):
 class ElegooDisplayCommunicator(DisplayCommunicator):
     supported_firmware_versions = ["1.2.11", "1.2.12"]
 
+    bed_leveling_box_size = 20
+
     async def get_firmware_version(self) -> str:
         return await self.display.get("p[35].b[11].txt", self.timeout)
 
@@ -277,7 +280,6 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
             await self.write(
                 f'xstr 0,464,320,16,2,{TEXT_WARNING},{BACKGROUND_GRAY},1,1,1,"WARNING: Unsupported Display Firmware Version"'
             )
-
 
     async def special_page_handling(self, current_page):
         if current_page == PAGE_MAIN:
@@ -310,6 +312,7 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
             await self.write("b[12].txt=\"Leveling\"")
             await self.write("b[18].txt=\"Screws Tilt Adjust\"")
             await self.write("b[19].txt=\"Z-Probe Offset\"")
+            await self.write("b[19].txt=\"Full Bed Level\"")
             self.leveling_mode = None
         elif current_page == PAGE_PRINTING_DIALOG_SPEED:
             await self.write("b[3].maxval=200")
@@ -321,7 +324,7 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
             await self.write("xstr 24,158,224,50,1,65535,10665,1,1,1,\"Reboot Host\"")
             await self.write("xstr 24,212,224,50,1,65535,10665,1,1,1,\"Reboot Klipper\"")
             await self.write("xstr 24,286,224,50,1,65535,10665,1,1,1,\"Back\"")
-    
+
     async def update_printing_heater_settings_ui(self, printing_selected_heater, printing_target_temp):
         if self.has_two_beds:
             await self.write(f'p[{self.mapper.map_page(PAGE_PRINTING_FILAMENT)}].b0.picc=' + str(90 if printing_selected_heater == "extruder" else 89))
@@ -364,7 +367,7 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
     async def update_prepare_extrude_ui(self, extrude_amount, extrude_speed):
         await self.write(f'p[{self.mapper.map_page(PAGE_PREPARE_EXTRUDER)}].b[8].txt="{extrude_amount}"')
         await self.write(f'p[{self.mapper.map_page(PAGE_PREPARE_EXTRUDER)}].b[9].txt="{extrude_speed}"')
-        
+
     async def update_wifi_ui(self):
         has_wifi, ssid, rssi_category = get_wlan0_status()
         if not has_wifi:
@@ -375,7 +378,7 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
         else:
             await self.write(f'picq 230,0,42,42,{313 + rssi_category}')
         return True
-    
+
     async def show_files_page(self, current_dir, dir_contents, files_page):
         page_size = 5
         title = current_dir.split("/")[-1]
@@ -437,23 +440,23 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
         await self.write("vis b[8],1")
         await self.write("fill 0,110,320,290,10665")
         await self.write("xstr 12,320,100,20,1,65535,10665,1,1,1,\"front left\"")
-        self.draw_screw_level_info_at("12,340,100,20", screw_levels["front left"])
+        await self.draw_screw_level_info_at("12,340,100,20", screw_levels["front left"])
 
         await self.write("xstr 170,320,100,20,1,65535,10665,1,1,1,\"front right\"")
-        self.draw_screw_level_info_at("170,340,100,20", screw_levels["front right"])
+        await self.draw_screw_level_info_at("170,340,100,20", screw_levels["front right"])
 
         await self.write("xstr 170,120,100,20,1,65535,10665,1,1,1,\"rear right\"")
-        self.draw_screw_level_info_at("170,140,100,20", screw_levels["rear right"])
+        await self.draw_screw_level_info_at("170,140,100,20", screw_levels["rear right"])
 
         await self.write("xstr 12,120,100,20,1,65535,10665,1,1,1,\"rear left\"")
-        self.draw_screw_level_info_at("12,140,100,20", screw_levels["rear left"])
+        await self.draw_screw_level_info_at("12,140,100,20", screw_levels["rear left"])
 
         if 'center right' in screw_levels:
             await self.write("xstr 12,220,100,30,1,65535,10665,1,1,1,\"center\\rright\"")
-            self.draw_screw_level_info_at("170,240,100,20", screw_levels["center right"])
+            await self.draw_screw_level_info_at("170,240,100,20", screw_levels["center right"])
         if 'center left' in screw_levels:
             await self.write("xstr 12,120,100,20,1,65535,10665,1,1,1,\"center\\rleft\"")
-            self.draw_screw_level_info_at("12,240,100,20", screw_levels["center left"])
+            await self.draw_screw_level_info_at("12,240,100,20", screw_levels["center left"])
 
         await self.write("xstr 96,215,100,50,1,65535,15319,1,1,1,\"Retry\"")
 
@@ -465,13 +468,13 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
             await self.write(f"xstr {position},0,{color},10665,1,1,1,\"{level}\"")
 
     async def update_screw_level_description(self, text):
-        self._write(f"b[3].txt=\"${text}\"")
-    
+        await self.write(f"b[3].txt=\"${text}\"")
+
     async def draw_initial_zprobe_leveling(self, z_probe_step, z_probe_distance):
         await self.write("p[137].b[19].txt=\"Z-Probe\"")
         await self.write("fill 0,250,320,320,10665")
         await self.write("fill 0,50,320,80,10665")
-        self.update_zprobe_leveling_ui(z_probe_step, z_probe_distance)
+        await self.update_zprobe_leveling_ui(z_probe_step, z_probe_distance)
 
     async def update_zprobe_leveling_ui(self, z_probe_step, z_probe_distance):
         await self.write("p[137].b[19].txt=\"Z-Probe\"")
@@ -495,10 +498,10 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
              await self.draw_kamp_box(x, y, 17037)
 
     async def update_kamp_text(self, text):
-        await self.write(f'xstr 0,310,320,50,1,65535,10665,1,1,1,"{text}"')
-    
+        await self.write(f'xstr 0,310,320,30,1,65535,10665,1,1,1,"{text}"')
+
     async def draw_kamp_box_index(self, index, color, bed_leveling_counts):
-        if self.bed_leveling_counts[0] == 0:
+        if bed_leveling_counts[0] == 0:
             return
         row = int(index / bed_leveling_counts[0])
         inverted_row = (bed_leveling_counts[1]-1) - row
@@ -519,8 +522,8 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
         await self.write(f'p[{self.mapper.map_page(PAGE_SETTINGS_ABOUT)}].b[9].txt="{max_x}x{max_y}x{max_z}"')
 
     async def display_thumbnail(self, page_number, thumbnail):
-        self._write("vis cp0,1", True)
-        self._write("p[" + str(page_number) + "].cp0.close()", True)
+        await self.write("vis cp0,1")
+        await self.write("p[" + str(page_number) + "].cp0.close()")
 
         parts = []
         start = 0
@@ -532,10 +535,24 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
 
         parts.append(thumbnail[start:len(thumbnail)])
         for part in parts:
-            self._write("p[" + str(page_number) + "].cp0.write(\"" + str(part) + "\")", True)
+            await self.write("p[" + str(page_number) + "].cp0.write(\"" + str(part) + "\")")
 
     async def hide_thumbnail(self):
         await self.write("vis cp0,0")
 
     async def update_time_remaining(self, time_remaining):
         await self.write(f'p[{self.mapper.map_page(PAGE_PRINTING)}].b[37].txt="{time_remaining}"')
+
+    async def show_bed_mesh_final(self):
+        await self.update_kamp_text("Bed Mesh completed")
+        await self.write("xstr 0,350,272,30,1,65535,10665,1,1,1,\"Tap SAVE to update printer config and restart\"")
+        await self.write("xstr 40,400,200,50,1,65535,15319,1,1,1,\"SAVE\"")
+
+    async def show_shutdown_screens(self):
+        await self.write("cls 44637")
+        await self.write("xstr 8,220,256,20,1,54151,44637,1,1,1,\"Please wait while your printer\"")
+        await self.write("xstr 24,240,224,20,1,54151,44637,1,1,1,\"shuts down.\"")
+        await self.write("delay=10000")
+        await self.write("cls BLACK")
+        await self.write("xstr 24,220,224,20,1,54150,0,1,1,1,\"It's now safe to turn off\"")
+        await self.write("xstr 24,240,224,20,1,54150,0,1,1,1,\"your printer.\"")

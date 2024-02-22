@@ -139,7 +139,6 @@ class DisplayController:
         self.full_bed_leveling_counts = [0, 0]
         self.bed_leveling_counts = [0, 0]
         self.bed_leveling_probed_count = 0
-        self.bed_leveling_box_size = 0
         self.bed_leveling_last_position = None
 
         self.klipper_restart_event = asyncio.Event()
@@ -202,7 +201,7 @@ class DisplayController:
         except Exception as e:
             logger.error(f"Error reading file: {e}")
         return None
-    
+
     async def special_page_handling(self, current_page):
         if current_page == PAGE_FILES:
             await self.display.show_files_page(self.current_dir, self.dir_contents, self.files_page)
@@ -225,10 +224,10 @@ class DisplayController:
         elif current_page == PAGE_LEVELING:
             self.leveling_mode = None
         elif current_page == PAGE_LEVELING_SCREW_ADJUST:
-            await self.draw_initial_screw_leveling()
+            await self.display.draw_initial_screw_leveling()
             self._loop.create_task(self.handle_screw_leveling())
         elif current_page == PAGE_LEVELING_Z_OFFSET_ADJUST:
-            await self.draw_initial_zprobe_leveling()
+            await self.display.draw_initial_zprobe_leveling()
             self._loop.create_task(self.handle_zprobe_leveling())
         elif current_page == PAGE_PRINTING_KAMP:
             await self.display.draw_kamp_page(self.bed_leveling_counts)
@@ -332,7 +331,7 @@ class DisplayController:
             parts = action.split('_')
             direction = parts[2]
             current_temp = self.printing_target_temps[self.printing_selected_heater]
-            self.send_gcode("SET_HEATER_TEMPERATURE HEATER=" + self.printing_selected_heater + " TARGET=" + 
+            self.send_gcode("SET_HEATER_TEMPERATURE HEATER=" + self.printing_selected_heater + " TARGET=" +
                             str(current_temp + (int(direction + self.printing_selected_temp_increment) * (1 if direction == '+' else -1))))
         elif action == "temp_reset":
             self.send_gcode("SET_HEATER_TEMPERATURE HEATER=" + self.printing_selected_heater + " TARGET=0")
@@ -435,6 +434,10 @@ class DisplayController:
         elif action == "retry_screw_leveling":
             self._loop.create_task(self.display.draw_initial_screw_leveling())
             self._loop.create_task(self.handle_screw_leveling())
+        elif action == "begin_full_bed_level":
+            self.leveling_mode = "full_bed"
+            self._navigate_to_page(PAGE_PRINTING_KAMP)
+            self.send_gcode("AUTO_FULL_BED_LEVEL")
         elif action.startswith("zprobe_step_"):
             parts = action.split('_')
             self.z_probe_step = parts[2]
@@ -448,6 +451,9 @@ class DisplayController:
             self._go_back()
         elif action == "save_zprobe":
             self.send_gcode("ACCEPT")
+            self.send_gcode("SAVE_CONFIG")
+            self._go_back()
+        elif action == "save_config":
             self.send_gcode("SAVE_CONFIG")
             self._go_back()
         elif action.startswith("set_speed_"):
@@ -465,7 +471,7 @@ class DisplayController:
             self._loop.create_task(self._send_moonraker_request("machine.reboot"))
         elif action == "shutdown_host":
             logger.info("Shutting down Host")
-            self._go_back()
+            self.display.show_shutdown_screens()
             self._loop.create_task(self._send_moonraker_request("machine.shutdown"))
         elif action == "reboot_klipper":
             logger.info("Rebooting Klipper")
@@ -693,7 +699,7 @@ class DisplayController:
             if component in input_actions[page]:
                 self.execute_action(input_actions[page][component].replace("$", str(value)))
                 return
-            
+
     def handle_custom_touch(self, x, y):
         if self._get_current_page() in custom_touch_actions:
             print(x, y)
@@ -787,7 +793,7 @@ class DisplayController:
         if len(self.history) > 0:
             return self.history[-1]
         return None
-    
+
     async def set_data_prepare_screen(self, filename):
         metadata = await self.load_metadata(filename)
         await self.display.set_data_prepare_screen(filename, metadata)
@@ -952,7 +958,10 @@ class DisplayController:
             self.bed_leveling_probed_count = 0
             self.bed_leveling_counts = self.full_bed_leveling_counts
             if self._get_current_page() == PAGE_PRINTING_KAMP:
-                self._go_back()
+                if self.leveling_mode == "full_bed":
+                    self._loop.create_task(self.display.show_bed_mesh_final())
+                else:
+                    self._go_back()
 
 loop = asyncio.get_event_loop()
 config_observer = Observer()
