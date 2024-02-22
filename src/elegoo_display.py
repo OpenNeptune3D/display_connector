@@ -229,18 +229,6 @@ class ElegooDisplayMapper(Mapper):
                     )
                 ]
             },
-            "filament_switch_sensor fila": {
-                "enabled": [
-                    MappingLeaf(
-                        [
-                            build_accessor(self.map_page(PAGE_SETTINGS), "11"),
-                            build_accessor(self.map_page(PAGE_PRINTING_ADJUST), "16"),
-                        ],
-                        field_type="pic",
-                        formatter=lambda x: "77" if int(x) == 1 else "76",
-                    )
-                ]
-            },
         }
 
     def set_z_display(self, value):
@@ -264,6 +252,21 @@ class ElegooDisplayMapper(Mapper):
                 ],
                 "total_layer": [MappingLeaf([])],
             }
+
+    def set_filament_sensor_name(self, value):
+        self.data_mapping[f"filament_switch_sensor {value}"] = {
+                "enabled": [
+                    MappingLeaf(
+                        [
+                            build_accessor(self.map_page(PAGE_SETTINGS), "11"),
+                            build_accessor(self.map_page(PAGE_PRINTING_ADJUST), "16"),
+                        ],
+                        field_type="pic",
+                        formatter=lambda x: "77" if int(x) == 1 else "76",
+                    )
+                ]
+            }
+        print(self.data_mapping)
 
 
 class ElegooDisplayCommunicator(DisplayCommunicator):

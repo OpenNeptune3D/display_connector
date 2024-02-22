@@ -88,6 +88,8 @@ SOCKET_LIMIT = 20 * 1024 * 1024
 class DisplayController:
     last_config_change = 0
 
+    filament_sensor_name = "fila"
+
     def __init__(self, config):
         self.config = config
         self._handle_config()
@@ -95,6 +97,7 @@ class DisplayController:
 
         printer_model = self.get_printer_model()
         self.display = get_communicator_for_model(printer_model)(logger, printer_model, event_handler=self.display_event_handler, port=self.config.safe_get("general", "serial_port"))
+        self.display.mapper.set_filament_sensor_name(self.filament_sensor_name)
         self._handle_display_config()
 
         self.part_light_state = False
@@ -170,6 +173,8 @@ class DisplayController:
         if "general" in self.config:
             if "clean_filename_regex" in self.config["general"]:
                 filename_regex_wrapper["default"] = re.compile(self.config["general"]["clean_filename_regex"])
+            if "filament_sensor_name" in self.config["general"]:
+                self.filament_sensor_name = self.config["general"]["filament_sensor_name"]
 
         if "LOGGING" in self.config:
             if "file_log_level" in  self.config["LOGGING"]:
@@ -496,7 +501,7 @@ class DisplayController:
         self.send_gcode(gcode)
 
     def _toggle_filament_sensor(self, state):
-        gcode = f"SET_FILAMENT_SENSOR SENSOR=fila ENABLE={'1' if state else '0'}"
+        gcode = f"SET_FILAMENT_SENSOR SENSOR={self.filament_sensor_name} ENABLE={'1' if state else '0'}"
         self.send_gcode(gcode)
 
     def save_temp_preset(self):
@@ -610,7 +615,7 @@ class DisplayController:
             "output_pin Part_Light": ["value"],
             "output_pin Frame_Light": ["value"],
             "configfile": ["config"],
-            "filament_switch_sensor fila": ["enabled"]
+            f"filament_switch_sensor {self.filament_sensor_name}": ["enabled"]
         }})
         data = ret["result"]["status"]
         logger.info("Printer Model: " + str(self.display.get_device_name()))
@@ -887,8 +892,8 @@ class DisplayController:
             self.fan_state = float(new_data["fan"]["speed"]) > 0
             self.printing_target_speeds["fan"] = float(new_data["fan"]["speed"])
             self._loop.create_task(self.display.update_printing_speed_settings_ui(self.printing_selected_speed_type, self.printing_target_speeds[self.printing_selected_speed_type]))
-        if "filament_switch_sensor fila" in new_data:
-            self.filament_sensor_state = int(new_data["filament_switch_sensor fila"]["enabled"]) == 1
+        if f"filament_switch_sensor {self.filament_sensor_name}" in new_data and new_data[f"filament_switch_sensor {self.filament_sensor_name}"]["enabled"] != None:
+            self.filament_sensor_state = int(new_data[f"filament_switch_sensor {self.filament_sensor_name}"]["enabled"]) == 1
         if "configfile" in new_data:
             self.handle_machine_config_change(new_data["configfile"])
 
