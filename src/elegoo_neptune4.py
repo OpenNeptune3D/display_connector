@@ -78,6 +78,7 @@ class Neptune4ProMapper(Neptune4Mapper):
                 ),
             ],
         }
+        self.set_filament_sensor_name("fila")
 
 
 
@@ -101,7 +102,6 @@ class Neptune4DisplayCommunicator(ElegooDisplayCommunicator):
     ) -> None:
         super().__init__(logger, model, port if port else "/dev/ttyS1", event_handler, baudrate, timeout)
         self.mapper = self.get_mapper(model)
-
         self.has_two_beds = model.lower() == MODEL_N4_PRO.lower()
 
     def get_mapper(self, model: str) -> Neptune4Mapper:

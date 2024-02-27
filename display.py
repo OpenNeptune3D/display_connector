@@ -97,7 +97,6 @@ class DisplayController:
 
         printer_model = self.get_printer_model()
         self.display = get_communicator_for_model(printer_model)(logger, printer_model, event_handler=self.display_event_handler, port=self.config.safe_get("general", "serial_port"))
-        self.display.mapper.set_filament_sensor_name(self.filament_sensor_name)
         self._handle_display_config()
 
         self.part_light_state = False
@@ -175,6 +174,7 @@ class DisplayController:
                 filename_regex_wrapper["default"] = re.compile(self.config["general"]["clean_filename_regex"])
             if "filament_sensor_name" in self.config["general"]:
                 self.filament_sensor_name = self.config["general"]["filament_sensor_name"]
+                self.display.mapper.set_filament_sensor_name(self.filament_sensor_name)
 
         if "LOGGING" in self.config:
             if "file_log_level" in  self.config["LOGGING"]:

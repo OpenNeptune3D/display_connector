@@ -230,18 +230,10 @@ class ElegooDisplayMapper(Mapper):
                 ]
             },
         }
+        self.set_z_display("mm")
 
     def set_z_display(self, value):
-        if value == "mm":
-            self.data_mapping["motion_report"]["live_position"][2] = [
-                MappingLeaf(
-                    [
-                        build_accessor(self.map_page(PAGE_MAIN), "z_pos"),
-                        build_accessor(self.map_page(PAGE_PRINTING), "zvalue"),
-                    ]
-                )
-            ]
-        elif value == "layer":
+        if value == "layer":
             self.data_mapping["print_stats"]["info"] = {
                 "current_layer": [
                     MappingLeaf(
@@ -252,6 +244,15 @@ class ElegooDisplayMapper(Mapper):
                 ],
                 "total_layer": [MappingLeaf([])],
             }
+        else:
+            self.data_mapping["motion_report"]["live_position"][2] = [
+                MappingLeaf(
+                    [
+                        build_accessor(self.map_page(PAGE_MAIN), "z_pos"),
+                        build_accessor(self.map_page(PAGE_PRINTING), "zvalue"),
+                    ]
+                )
+            ]
 
     def set_filament_sensor_name(self, value):
         self.data_mapping[f"filament_switch_sensor {value}"] = {
