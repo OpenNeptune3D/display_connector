@@ -716,6 +716,7 @@ class DisplayController:
             if component in input_actions[page]:
                 self.execute_action(input_actions[page][component].replace("$", str(value)))
                 return
+        logger.info(f"Unhandled Input: {page} {component} {value}")
 
     def handle_custom_touch(self, x, y):
         if self._get_current_page() in custom_touch_actions:
