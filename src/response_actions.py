@@ -22,6 +22,7 @@ response_actions = {
     3: {
         7: "page " + PAGE_LEVELING_SCREW_ADJUST,
         8: "page " + PAGE_LEVELING_Z_OFFSET_ADJUST,
+        9: "begin_full_bed_level",
     },
     # Prepare Temperature (Pro Only)
     6: {
@@ -205,7 +206,7 @@ input_actions = {
     6: {
         0: "set_temp_extruder_$",
         1: "set_temp_heater_bed_$",
-        2: "set_temp_heater_bed_outer_$",
+        10: "set_temp_heater_bed_outer_$",
     },
     # Prepare Extruder
     9: {
@@ -237,5 +238,8 @@ custom_touch_actions = {
         (24, 212, 248, 262): "reboot_klipper",
 
         (0, 0, 272, 480): "go_back",
+    },
+    "printing_kamp": {
+        (40, 400, 230, 450): "save_config"
     }
 }
