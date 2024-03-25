@@ -78,7 +78,7 @@ class Neptune4ProMapper(Neptune4Mapper):
                 ),
             ],
         }
-        self.set_filament_sensor_name("fila")
+        self.set_filament_sensor_name("filament_sensor")
 
 
 
