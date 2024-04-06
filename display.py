@@ -88,7 +88,7 @@ SOCKET_LIMIT = 20 * 1024 * 1024
 class DisplayController:
     last_config_change = 0
 
-    filament_sensor_name = "fila"
+    filament_sensor_name = "filament_sensor"
 
     def __init__(self, config):
         self.config = config
