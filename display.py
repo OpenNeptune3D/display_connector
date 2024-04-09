@@ -964,6 +964,10 @@ class DisplayController:
             if self._get_current_page() != PAGE_PRINTING_KAMP:
                 self._navigate_to_page(PAGE_PRINTING_KAMP)
         elif response.startswith("// probe at "):
+            if self._get_current_page() != PAGE_PRINTING_KAMP:
+                # We are not leveling, likely response came from manual probe e.g. from console,
+                # Skip updating the state, otherwise it messes up bed leveling screen when printing
+                return
             new_position = response.split(" ")[3]
             if self.bed_leveling_last_position != new_position:
                 self.bed_leveling_last_position = new_position
