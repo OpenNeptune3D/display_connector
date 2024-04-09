@@ -1060,7 +1060,7 @@ class DisplayController:
         path += best_thumbnail["relative_path"]
 
         img = requests.get(
-            "http://localhost/server/files/gcodes/" + pathname2url(path), timeout=5
+            f"{self.config.safe_get('general', 'moonraker_url', 'http://localhost:7125')}/server/files/gcodes/{pathname2url(path)}", timeout=5
         )
         thumbnail = Image.open(io.BytesIO(img.content))
         background = "29354a"
