@@ -64,4 +64,4 @@ jobs:
         pip install -r requirements.txt
     - name: run tests with pytest
       run: |
-        pytest
+        pytest --cov-config=.coveragerc --cov=. tests
