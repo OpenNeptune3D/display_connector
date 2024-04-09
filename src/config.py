@@ -31,7 +31,7 @@ class ConfigHandler(ConfigParser):
     def safe_get(self, section, key, default=None):
         try:
             return self.get(section, key)
-        except:
+        except KeyError:
             return default
 
     def initialize_config_file(self):
@@ -41,7 +41,7 @@ class ConfigHandler(ConfigParser):
             self.set(
                 "general",
                 "clean_filename_regex",
-                ".*_(.*?_(?:[0-9]+h|[0-9]+m|[0-9]+s)+\.gcode)",
+                r".*_(.*?_(?:[0-9]+h|[0-9]+m|[0-9]+s)+\.gcode)",
             )
             self.add_section("LOGGING")
             self.set("LOGGING", "file_log_level", "ERROR")

@@ -10,6 +10,7 @@ MODEL_N3_MAX = "N3Max"
 
 MODELS_N3 = [MODEL_N3_REGULAR, MODEL_N3_PRO, MODEL_N3_PLUS, MODEL_N3_MAX]
 
+
 class Neptune3DisplayMapper(ElegooDisplayMapper):
     pass
 

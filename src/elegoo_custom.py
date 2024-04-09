@@ -4,6 +4,7 @@ from src.elegoo_display import ElegooDisplayCommunicator, ElegooDisplayMapper
 
 MODEL_CUSTOM = "Custom"
 
+
 class CustomDisplayCommunicator(ElegooDisplayCommunicator):
     def __init__(
         self,

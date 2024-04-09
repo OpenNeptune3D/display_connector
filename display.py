@@ -21,18 +21,48 @@ from src.tjc import EventType
 from src.response_actions import response_actions, input_actions, custom_touch_actions
 from src.lib_col_pic import parse_thumbnail
 from src.communicator import DisplayCommunicator
-from src.elegoo_neptune4 import MODEL_N4_REGULAR, MODEL_N4_PRO, MODEL_N4_PLUS, MODEL_N4_MAX, MODELS_N4, Neptune4DisplayCommunicator
-from src.elegoo_neptune3 import MODEL_N3_REGULAR, MODEL_N3_PRO, MODEL_N3_PLUS, MODEL_N3_MAX, MODELS_N3, Neptune3DisplayCommunicator
+from src.elegoo_neptune4 import (
+    MODEL_N4_REGULAR,
+    MODEL_N4_PRO,
+    MODEL_N4_PLUS,
+    MODEL_N4_MAX,
+    MODELS_N4,
+    Neptune4DisplayCommunicator,
+)
+from src.elegoo_neptune3 import MODELS_N3, Neptune3DisplayCommunicator
 from src.elegoo_custom import MODEL_CUSTOM, CustomDisplayCommunicator
-from src.mapping import PAGE_SHUTDOWN_DIALOG, build_format_filename, filename_regex_wrapper, PAGE_MAIN, PAGE_FILES, PAGE_PREPARE_MOVE, PAGE_PREPARE_TEMP, PAGE_PREPARE_EXTRUDER, PAGE_SETTINGS_TEMPERATURE_SET, PAGE_SETTINGS_ABOUT, PAGE_LEVELING, PAGE_LEVELING_SCREW_ADJUST, PAGE_LEVELING_Z_OFFSET_ADJUST, PAGE_CONFIRM_PRINT, PAGE_PRINTING, PAGE_PRINTING_KAMP, PAGE_PRINTING_PAUSE, PAGE_PRINTING_STOP, PAGE_PRINTING_EMERGENCY_STOP, PAGE_PRINTING_COMPLETE, PAGE_PRINTING_FILAMENT, PAGE_PRINTING_SPEED, PAGE_PRINTING_ADJUST, PAGE_PRINTING_DIALOG_SPEED, PAGE_PRINTING_DIALOG_FLOW, PAGE_OVERLAY_LOADING, format_time
-from src.colors import BACKGROUND_DIALOG, BACKGROUND_GRAY, BACKGROUND_SUCCESS, BACKGROUND_WARNING, TEXT_SUCCESS, TEXT_ERROR
-from src.wifi import get_wlan0_status
+from src.mapping import (
+    build_format_filename,
+    filename_regex_wrapper,
+    PAGE_MAIN,
+    PAGE_FILES,
+    PAGE_PREPARE_MOVE,
+    PAGE_PREPARE_TEMP,
+    PAGE_PREPARE_EXTRUDER,
+    PAGE_SETTINGS_TEMPERATURE_SET,
+    PAGE_LEVELING,
+    PAGE_LEVELING_SCREW_ADJUST,
+    PAGE_LEVELING_Z_OFFSET_ADJUST,
+    PAGE_CONFIRM_PRINT,
+    PAGE_PRINTING,
+    PAGE_PRINTING_KAMP,
+    PAGE_PRINTING_PAUSE,
+    PAGE_PRINTING_STOP,
+    PAGE_PRINTING_EMERGENCY_STOP,
+    PAGE_PRINTING_COMPLETE,
+    PAGE_PRINTING_FILAMENT,
+    PAGE_PRINTING_SPEED,
+    PAGE_PRINTING_ADJUST,
+    PAGE_OVERLAY_LOADING,
+    format_time,
+)
+from src.colors import BACKGROUND_SUCCESS, BACKGROUND_WARNING
 
 log_file = os.path.expanduser("~/printer_data/logs/display_connector.log")
 logger = logging.getLogger(__name__)
 ch_log = logging.StreamHandler(sys.stdout)
 ch_log.setLevel(logging.DEBUG)
-formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 ch_log.setFormatter(formatter)
 logger.addHandler(ch_log)
 file_log = logging.FileHandler(log_file)
@@ -61,19 +91,13 @@ TABBED_PAGES = [
     PAGE_PREPARE_TEMP,
     PAGE_PRINTING_ADJUST,
     PAGE_PRINTING_FILAMENT,
-    PAGE_PRINTING_SPEED
+    PAGE_PRINTING_SPEED,
 ]
 
-TRANSITION_PAGES = [
-    PAGE_OVERLAY_LOADING
-]
+TRANSITION_PAGES = [PAGE_OVERLAY_LOADING]
 
-SUPPORTED_PRINTERS = [
-    MODEL_N4_REGULAR,
-    MODEL_N4_PRO,
-    MODEL_N4_PLUS,
-    MODEL_N4_MAX
-]
+SUPPORTED_PRINTERS = [MODEL_N4_REGULAR, MODEL_N4_PRO, MODEL_N4_PLUS, MODEL_N4_MAX]
+
 
 def get_communicator_for_model(model) -> DisplayCommunicator:
     if model == MODEL_CUSTOM:
@@ -85,6 +109,8 @@ def get_communicator_for_model(model) -> DisplayCommunicator:
 
 
 SOCKET_LIMIT = 20 * 1024 * 1024
+
+
 class DisplayController:
     last_config_change = 0
 
@@ -96,7 +122,12 @@ class DisplayController:
         self.connected = False
 
         printer_model = self.get_printer_model()
-        self.display = get_communicator_for_model(printer_model)(logger, printer_model, event_handler=self.display_event_handler, port=self.config.safe_get("general", "serial_port"))
+        self.display = get_communicator_for_model(printer_model)(
+            logger,
+            printer_model,
+            event_handler=self.display_event_handler,
+            port=self.config.safe_get("general", "serial_port"),
+        )
         self._handle_display_config()
 
         self.part_light_state = False
@@ -104,10 +135,10 @@ class DisplayController:
         self.fan_state = False
         self.filament_sensor_state = False
 
-        self.move_distance = '1'
+        self.move_distance = "1"
         self.xy_move_speed = 130
         self.z_move_speed = 10
-        self.z_offset_distance = '0.01'
+        self.z_offset_distance = "0.01"
         self.out_fd = sys.stdout.fileno()
         os.set_blocking(self.out_fd, False)
         self.pending_req = {}
@@ -123,15 +154,11 @@ class DisplayController:
         self.printing_target_temps = {
             "extruder": 0,
             "heater_bed": 0,
-            "heater_bed_outer": 0
+            "heater_bed_outer": 0,
         }
         self.printing_selected_temp_increment = "10"
         self.printing_selected_speed_type = "print"
-        self.printing_target_speeds = {
-            "print": 1.0,
-            "flow": 1.0,
-            "fan": 1.0
-        }
+        self.printing_target_speeds = {"print": 1.0, "flow": 1.0, "fan": 1.0}
         self.printing_selected_speed_increment = "10"
 
         self.extrude_amount = 50
@@ -171,14 +198,18 @@ class DisplayController:
         logger.info("Loading config")
         if "general" in self.config:
             if "clean_filename_regex" in self.config["general"]:
-                filename_regex_wrapper["default"] = re.compile(self.config["general"]["clean_filename_regex"])
+                filename_regex_wrapper["default"] = re.compile(
+                    self.config["general"]["clean_filename_regex"]
+                )
             if "filament_sensor_name" in self.config["general"]:
-                self.filament_sensor_name = self.config["general"]["filament_sensor_name"]
+                self.filament_sensor_name = self.config["general"][
+                    "filament_sensor_name"
+                ]
                 self.display.mapper.set_filament_sensor_name(self.filament_sensor_name)
 
         if "LOGGING" in self.config:
-            if "file_log_level" in  self.config["LOGGING"]:
-                file_log.setLevel( self.config["LOGGING"]["file_log_level"])
+            if "file_log_level" in self.config["LOGGING"]:
+                file_log.setLevel(self.config["LOGGING"]["file_log_level"])
                 logger.setLevel(logging.DEBUG)
         if "prepare" in self.config:
             prepare = self.config["prepare"]
@@ -194,24 +225,32 @@ class DisplayController:
     def _handle_display_config(self):
         if "main_screen" in self.config:
             if "display_name" in self.config["main_screen"]:
-                self.display.display_name_override = self.config["main_screen"]["display_name"]
+                self.display.display_name_override = self.config["main_screen"][
+                    "display_name"
+                ]
             if "display_name_line_color" in self.config["main_screen"]:
-                self.display.display_name_line_color = self.config["main_screen"]["display_name_line_color"]
+                self.display.display_name_line_color = self.config["main_screen"][
+                    "display_name_line_color"
+                ]
         if "print_screen" in self.config:
             if "z_display" in self.config["print_screen"]:
-                self.display.mapper.set_z_display(self.config["print_screen"]["z_display"])
+                self.display.mapper.set_z_display(
+                    self.config["print_screen"]["z_display"]
+                )
             if "clean_filename_regex" in self.config["print_screen"]:
-                filename_regex_wrapper["printing"] = re.compile(self.config["print_screen"]["clean_filename_regex"])
+                filename_regex_wrapper["printing"] = re.compile(
+                    self.config["print_screen"]["clean_filename_regex"]
+                )
 
     def get_printer_model(self):
         if "general" in self.config:
             if "printer_model" in self.config["general"]:
                 return self.config["general"]["printer_model"]
         try:
-            with open('/boot/.OpenNept4une.txt', 'r') as file:
+            with open("/boot/.OpenNept4une.txt", "r") as file:
                 for line in file:
                     if line.startswith(tuple(SUPPORTED_PRINTERS)):
-                        model_part = line.split('-')[0].strip()
+                        model_part = line.split("-")[0].strip()
                         return model_part
         except FileNotFoundError:
             logger.error("File not found")
@@ -221,23 +260,43 @@ class DisplayController:
 
     async def special_page_handling(self, current_page):
         if current_page == PAGE_FILES:
-            await self.display.show_files_page(self.current_dir, self.dir_contents, self.files_page)
+            await self.display.show_files_page(
+                self.current_dir, self.dir_contents, self.files_page
+            )
         elif current_page == PAGE_PREPARE_MOVE:
             await self.display.update_prepare_move_ui(self.move_distance)
         elif current_page == PAGE_PREPARE_EXTRUDER:
-            await self.display.update_prepare_extrude_ui(self.extrude_amount, self.extrude_speed)
+            await self.display.update_prepare_extrude_ui(
+                self.extrude_amount, self.extrude_speed
+            )
         elif current_page == PAGE_SETTINGS_TEMPERATURE_SET:
-            await self.display.update_preset_temp_ui(self.temperature_preset_step, self.temperature_preset_extruder, self.temperature_preset_bed)
+            await self.display.update_preset_temp_ui(
+                self.temperature_preset_step,
+                self.temperature_preset_extruder,
+                self.temperature_preset_bed,
+            )
         elif current_page == PAGE_CONFIRM_PRINT:
             self._loop.create_task(self.set_data_prepare_screen(self.current_filename))
         elif current_page == PAGE_PRINTING_FILAMENT:
-            await self.display.update_printing_heater_settings_ui(self.printing_selected_heater, self.printing_target_temps[self.printing_selected_heater])
-            await self.display.update_printing_temperature_increment_ui(self.printing_selected_temp_increment)
+            await self.display.update_printing_heater_settings_ui(
+                self.printing_selected_heater,
+                self.printing_target_temps[self.printing_selected_heater],
+            )
+            await self.display.update_printing_temperature_increment_ui(
+                self.printing_selected_temp_increment
+            )
         elif current_page == PAGE_PRINTING_ADJUST:
-            await self.display.update_printing_zoffset_increment_ui(self.z_offset_distance)
+            await self.display.update_printing_zoffset_increment_ui(
+                self.z_offset_distance
+            )
         elif current_page == PAGE_PRINTING_SPEED:
-            await self.display.update_printing_speed_settings_ui(self.printing_selected_speed_type, self.printing_target_speeds[self.printing_selected_speed_type])
-            await self.display.update_printing_speed_increment_ui(self.printing_selected_speed_increment)
+            await self.display.update_printing_speed_settings_ui(
+                self.printing_selected_speed_type,
+                self.printing_target_speeds[self.printing_selected_speed_type],
+            )
+            await self.display.update_printing_speed_increment_ui(
+                self.printing_selected_speed_increment
+            )
         elif current_page == PAGE_LEVELING:
             self.leveling_mode = None
         elif current_page == PAGE_LEVELING_SCREW_ADJUST:
@@ -254,18 +313,22 @@ class DisplayController:
     async def send_gcodes_async(self, gcodes):
         for gcode in gcodes:
             logger.debug("Sending GCODE: " + gcode)
-            await self._send_moonraker_request("printer.gcode.script", {"script": gcode})
+            await self._send_moonraker_request(
+                "printer.gcode.script", {"script": gcode}
+            )
             await asyncio.sleep(0.1)
 
     def send_gcode(self, gcode):
         logger.debug("Sending GCODE: " + gcode)
-        self._loop.create_task(self._send_moonraker_request("printer.gcode.script", {"script": gcode}))
+        self._loop.create_task(
+            self._send_moonraker_request("printer.gcode.script", {"script": gcode})
+        )
 
     def move_axis(self, axis, distance):
         speed = self.xy_move_speed if axis in ["X", "Y"] else self.z_move_speed
-        self.send_gcode(f'G91\nG1 {axis}{distance} F{int(speed) * 60}\nG90')
+        self.send_gcode(f"G91\nG1 {axis}{distance} F{int(speed) * 60}\nG90")
 
-    def _navigate_to_page(self, page, clear_history = False):
+    def _navigate_to_page(self, page, clear_history=False):
         if len(self.history) == 0 or self.history[-1] != page:
             if page in TABBED_PAGES and self.history[-1] in TABBED_PAGES:
                 self.history[-1] = page
@@ -273,28 +336,38 @@ class DisplayController:
                 if clear_history:
                     self.history = []
                 self.history.append(page)
-            self._loop.create_task(self.display.navigate_to(self.display.mapper.map_page(page)))
+            self._loop.create_task(
+                self.display.navigate_to(self.display.mapper.map_page(page))
+            )
             logger.debug(f"Navigating to {page}")
             self._loop.create_task(self.special_page_handling(page))
 
     def execute_action(self, action):
         if action.startswith("move_"):
-            parts = action.split('_')
+            parts = action.split("_")
             axis = parts[1].upper()
             direction = parts[2]
             self.move_axis(axis, direction + self.move_distance)
         elif action.startswith("set_distance_"):
-            parts = action.split('_')
+            parts = action.split("_")
             self.move_distance = parts[2]
-            self._loop.create_task(self.display.update_prepare_move_ui(self.move_distance))
+            self._loop.create_task(
+                self.display.update_prepare_move_ui(self.move_distance)
+            )
         if action.startswith("zoffset_"):
-            parts = action.split('_')
+            parts = action.split("_")
             direction = parts[1]
-            self.send_gcode(f"SET_GCODE_OFFSET Z_ADJUST={direction}{self.z_offset_distance} MOVE=1")
+            self.send_gcode(
+                f"SET_GCODE_OFFSET Z_ADJUST={direction}{self.z_offset_distance} MOVE=1"
+            )
         elif action.startswith("zoffsetchange_"):
-            parts = action.split('_')
+            parts = action.split("_")
             self.z_offset_distance = parts[1]
-            self._loop.create_task(self.display.update_printing_zoffset_increment_ui(self.z_offset_distance))
+            self._loop.create_task(
+                self.display.update_printing_zoffset_increment_ui(
+                    self.z_offset_distance
+                )
+            )
         elif action == "toggle_part_light":
             self.part_light_state = not self.part_light_state
             self._set_light("Part_Light", self.part_light_state)
@@ -313,14 +386,18 @@ class DisplayController:
         elif action == "go_back":
             self._go_back()
         elif action.startswith("page"):
-            self._navigate_to_page(action.split(' ')[1])
+            self._navigate_to_page(action.split(" ")[1])
         elif action == "emergency_stop":
             logger.info("Executing emergency stop!")
-            self._loop.create_task(self._send_moonraker_request("printer.emergency_stop"))
+            self._loop.create_task(
+                self._send_moonraker_request("printer.emergency_stop")
+            )
         elif action == "pause_print_button":
             if self.current_state == "paused":
                 logger.info("Resuming print")
-                self._loop.create_task(self._send_moonraker_request("printer.print.resume"))
+                self._loop.create_task(
+                    self._send_moonraker_request("printer.print.resume")
+                )
             else:
                 self._go_back()
                 self._navigate_to_page(PAGE_PRINTING_PAUSE)
@@ -337,44 +414,91 @@ class DisplayController:
             self._navigate_to_page(PAGE_FILES)
             self._loop.create_task(self._load_files())
         elif action.startswith("temp_heater_"):
-            parts = action.split('_')
+            parts = action.split("_")
             self.printing_selected_heater = "_".join(parts[2:])
-            self._loop.create_task(self.display.update_printing_heater_settings_ui(self.printing_selected_heater, self.printing_target_temps[self.printing_selected_heater]))
+            self._loop.create_task(
+                self.display.update_printing_heater_settings_ui(
+                    self.printing_selected_heater,
+                    self.printing_target_temps[self.printing_selected_heater],
+                )
+            )
         elif action.startswith("temp_increment_"):
-            parts = action.split('_')
+            parts = action.split("_")
             self.printing_selected_temp_increment = parts[2]
-            self._loop.create_task(self.display.update_printing_temperature_increment_ui(self.printing_selected_temp_increment))
+            self._loop.create_task(
+                self.display.update_printing_temperature_increment_ui(
+                    self.printing_selected_temp_increment
+                )
+            )
         elif action.startswith("temp_adjust_"):
-            parts = action.split('_')
+            parts = action.split("_")
             direction = parts[2]
             current_temp = self.printing_target_temps[self.printing_selected_heater]
-            self.send_gcode("SET_HEATER_TEMPERATURE HEATER=" + self.printing_selected_heater + " TARGET=" +
-                            str(current_temp + (int(direction + self.printing_selected_temp_increment) * (1 if direction == '+' else -1))))
+            self.send_gcode(
+                "SET_HEATER_TEMPERATURE HEATER="
+                + self.printing_selected_heater
+                + " TARGET="
+                + str(
+                    current_temp
+                    + (
+                        int(direction + self.printing_selected_temp_increment)
+                        * (1 if direction == "+" else -1)
+                    )
+                )
+            )
         elif action == "temp_reset":
-            self.send_gcode("SET_HEATER_TEMPERATURE HEATER=" + self.printing_selected_heater + " TARGET=0")
+            self.send_gcode(
+                "SET_HEATER_TEMPERATURE HEATER="
+                + self.printing_selected_heater
+                + " TARGET=0"
+            )
         elif action.startswith("speed_type_"):
-            parts = action.split('_')
+            parts = action.split("_")
             self.printing_selected_speed_type = parts[2]
-            self._loop.create_task(self.display.update_printing_speed_settings_ui(self.printing_selected_speed_type, self.printing_target_speeds[self.printing_selected_speed_type]))
+            self._loop.create_task(
+                self.display.update_printing_speed_settings_ui(
+                    self.printing_selected_speed_type,
+                    self.printing_target_speeds[self.printing_selected_speed_type],
+                )
+            )
         elif action.startswith("speed_increment_"):
-            parts = action.split('_')
+            parts = action.split("_")
             self.printing_selected_speed_increment = parts[2]
-            self._loop.create_task(self.display.update_printing_speed_increment_ui(self.printing_selected_speed_increment))
+            self._loop.create_task(
+                self.display.update_printing_speed_increment_ui(
+                    self.printing_selected_speed_increment
+                )
+            )
         elif action.startswith("speed_adjust_"):
-            parts = action.split('_')
+            parts = action.split("_")
             direction = parts[2]
-            current_speed = self.printing_target_speeds[self.printing_selected_speed_type]
-            change = (int(self.printing_selected_speed_increment) * (1 if direction == '+' else -1))
-            self.send_speed_update(self.printing_selected_speed_type, (current_speed + (change / 100.0)) * 100)
+            current_speed = self.printing_target_speeds[
+                self.printing_selected_speed_type
+            ]
+            change = int(self.printing_selected_speed_increment) * (
+                1 if direction == "+" else -1
+            )
+            self.send_speed_update(
+                self.printing_selected_speed_type,
+                (current_speed + (change / 100.0)) * 100,
+            )
         elif action == "speed_reset":
             self.send_speed_update(self.printing_selected_speed_type, 1.0)
         elif action.startswith("files_page_"):
-            parts = action.split('_')
+            parts = action.split("_")
             direction = parts[2]
-            self.files_page = int(max(0, min((len(self.dir_contents)/5), self.files_page + (1 if direction == 'next' else -1))))
+            self.files_page = int(
+                max(
+                    0,
+                    min(
+                        (len(self.dir_contents) / 5),
+                        self.files_page + (1 if direction == "next" else -1),
+                    ),
+                )
+            )
             self.display.show_files_page()
         elif action.startswith("open_file_"):
-            parts = action.split('_')
+            parts = action.split("_")
             index = int(parts[2])
             selected = self.dir_contents[(self.files_page * 5) + index]
             if selected["type"] == "dir":
@@ -387,17 +511,23 @@ class DisplayController:
         elif action == "print_opened_file":
             self._go_back()
             self._navigate_to_page(PAGE_OVERLAY_LOADING)
-            self._loop.create_task(self._send_moonraker_request("printer.print.start", {"filename": self.current_filename}))
+            self._loop.create_task(
+                self._send_moonraker_request(
+                    "printer.print.start", {"filename": self.current_filename}
+                )
+            )
         elif action == "confirm_complete":
             logger.info("Clearing SD Card")
             self.send_gcode("SDCARD_RESET_FILE")
         elif action.startswith("set_temp"):
-            parts = action.split('_')
+            parts = action.split("_")
             target = parts[-1]
             heater = "_".join(parts[2:-1])
-            self.send_gcode("SET_HEATER_TEMPERATURE HEATER=" + heater + " TARGET=" + target)
+            self.send_gcode(
+                "SET_HEATER_TEMPERATURE HEATER=" + heater + " TARGET=" + target
+            )
         elif action.startswith("set_preset_temp"):
-            parts = action.split('_')
+            parts = action.split("_")
             material = parts[3].lower()
 
             if "temperatures." + material in self.config:
@@ -408,43 +538,65 @@ class DisplayController:
                 heater_bed = TEMP_DEFAULTS[material][1]
             gcodes = [
                 f"SET_HEATER_TEMPERATURE HEATER=extruder TARGET={extruder}",
-                f"SET_HEATER_TEMPERATURE HEATER=heater_bed TARGET={heater_bed}"
+                f"SET_HEATER_TEMPERATURE HEATER=heater_bed TARGET={heater_bed}",
             ]
             if self.display.model == MODEL_N4_PRO:
-                gcodes.append(f"SET_HEATER_TEMPERATURE HEATER=heater_bed_outer TARGET={heater_bed}")
+                gcodes.append(
+                    f"SET_HEATER_TEMPERATURE HEATER=heater_bed_outer TARGET={heater_bed}"
+                )
             self._loop.create_task(self.send_gcodes_async(gcodes))
         elif action.startswith("set_extrude_amount"):
-            self.extrude_amount = int(action.split('_')[3])
-            self._loop.create_task(self.display.update_prepare_extrude_ui(self.extrude_amount))
+            self.extrude_amount = int(action.split("_")[3])
+            self._loop.create_task(
+                self.display.update_prepare_extrude_ui(self.extrude_amount)
+            )
         elif action.startswith("set_extrude_speed"):
-            self.extrude_speed = int(action.split('_')[3])
-            self._loop.create_task(self.display.update_prepare_extrude_ui(self.extrude_speed))
+            self.extrude_speed = int(action.split("_")[3])
+            self._loop.create_task(
+                self.display.update_prepare_extrude_ui(self.extrude_speed)
+            )
         elif action.startswith("extrude_"):
-            parts = action.split('_')
+            parts = action.split("_")
             direction = parts[1]
-            self.send_gcode(f"M83\nG1 E{direction}{self.extrude_amount} F{self.extrude_speed * 60}")
+            self.send_gcode(
+                f"M83\nG1 E{direction}{self.extrude_amount} F{self.extrude_speed * 60}"
+            )
         elif action.startswith("start_temp_preset_"):
-            material = action.split('_')[3]
+            material = action.split("_")[3]
             self.temperature_preset_material = material
             if "temperatures." + material in self.config:
-                self.temperature_preset_extruder = int(self.config["temperatures." + material]["extruder"])
-                self.temperature_preset_bed = int(self.config["temperatures." + material]["heater_bed"])
+                self.temperature_preset_extruder = int(
+                    self.config["temperatures." + material]["extruder"]
+                )
+                self.temperature_preset_bed = int(
+                    self.config["temperatures." + material]["heater_bed"]
+                )
             else:
                 self.temperature_preset_extruder = TEMP_DEFAULTS[material][0]
                 self.temperature_preset_bed = TEMP_DEFAULTS[material][1]
             self._navigate_to_page(PAGE_SETTINGS_TEMPERATURE_SET)
         elif action.startswith("preset_temp_step_"):
-            size = int(action.split('_')[3])
+            size = int(action.split("_")[3])
             self.temperature_preset_step = size
         elif action.startswith("preset_temp_"):
-            parts = action.split('_')
+            parts = action.split("_")
             heater = parts[2]
-            change = self.temperature_preset_step if parts[3] == "up" else -self.temperature_preset_step
+            change = (
+                self.temperature_preset_step
+                if parts[3] == "up"
+                else -self.temperature_preset_step
+            )
             if heater == "extruder":
                 self.temperature_preset_extruder += change
             else:
                 self.temperature_preset_bed += change
-            self._loop.create_task(self.display.update_preset_temp_ui(self.temperature_preset_step, self.temperature_preset_extruder, self.temperature_preset_bed))
+            self._loop.create_task(
+                self.display.update_preset_temp_ui(
+                    self.temperature_preset_step,
+                    self.temperature_preset_extruder,
+                    self.temperature_preset_bed,
+                )
+            )
         elif action == "save_temp_preset":
             logger.info("Saving temp preset")
             self.save_temp_preset()
@@ -456,11 +608,15 @@ class DisplayController:
             self._navigate_to_page(PAGE_PRINTING_KAMP)
             self.send_gcode("AUTO_FULL_BED_LEVEL")
         elif action.startswith("zprobe_step_"):
-            parts = action.split('_')
+            parts = action.split("_")
             self.z_probe_step = parts[2]
-            self._loop.create_task(self.display.update_zprobe_leveling_ui(self.z_probe_step, self.z_probe_distance))
+            self._loop.create_task(
+                self.display.update_zprobe_leveling_ui(
+                    self.z_probe_step, self.z_probe_distance
+                )
+            )
         elif action.startswith("zprobe_"):
-            parts = action.split('_')
+            parts = action.split("_")
             direction = parts[1]
             self.send_gcode(f"TESTZ Z={direction}{self.z_probe_step}")
         elif action == "abort_zprobe":
@@ -474,11 +630,11 @@ class DisplayController:
             self.send_gcode("SAVE_CONFIG")
             self._go_back()
         elif action.startswith("set_speed_"):
-            parts = action.split('_')
+            parts = action.split("_")
             speed = int(parts[2])
             self.send_speed_update("print", speed)
         elif action.startswith("set_flow_"):
-            parts = action.split('_')
+            parts = action.split("_")
             speed = int(parts[2])
             self.send_speed_update("flow", speed)
         elif action == "reboot_host":
@@ -492,7 +648,11 @@ class DisplayController:
             self._loop.create_task(self._send_moonraker_request("machine.shutdown"))
         elif action == "reboot_klipper":
             logger.info("Rebooting Klipper")
-            self._loop.create_task(self._send_moonraker_request("machine.services.restart", {"service": "klipper"}))
+            self._loop.create_task(
+                self._send_moonraker_request(
+                    "machine.services.restart", {"service": "klipper"}
+                )
+            )
             self._go_back()
             self._navigate_to_page(PAGE_OVERLAY_LOADING)
 
@@ -507,8 +667,16 @@ class DisplayController:
     def save_temp_preset(self):
         if "temperatures." + self.temperature_preset_material not in self.config:
             self.config["temperatures." + self.temperature_preset_material] = {}
-        self.config.set("temperatures." + self.temperature_preset_material, "extruder", str(self.temperature_preset_extruder))
-        self.config.set("temperatures." + self.temperature_preset_material, "heater_bed", str(self.temperature_preset_bed))
+        self.config.set(
+            "temperatures." + self.temperature_preset_material,
+            "extruder",
+            str(self.temperature_preset_extruder),
+        )
+        self.config.set(
+            "temperatures." + self.temperature_preset_material,
+            "heater_bed",
+            str(self.temperature_preset_bed),
+        )
         self.config.write_changes()
         self._go_back()
 
@@ -533,48 +701,61 @@ class DisplayController:
         return path[1:]
 
     def sort_dir_contents(self, dir_contents):
-        key = 'modified'
+        key = "modified"
         reverse = True
-        if 'files' in self.config:
-            files_config = self.config['files']
-            if 'sort_by' in files_config:
-                key = files_config['sort_by']
-            if 'sort_order' in files_config:
-                reverse = files_config['sort_order'] == 'desc'
+        if "files" in self.config:
+            files_config = self.config["files"]
+            if "sort_by" in files_config:
+                key = files_config["sort_by"]
+            if "sort_order" in files_config:
+                reverse = files_config["sort_order"] == "desc"
         return sorted(dir_contents, key=lambda k: k[key], reverse=reverse)
 
     async def _load_files(self):
-        data = (await self._send_moonraker_request("server.files.get_directory", {"path": "/".join(["gcodes", self.current_dir])}))
+        data = await self._send_moonraker_request(
+            "server.files.get_directory",
+            {"path": "/".join(["gcodes", self.current_dir])},
+        )
         dir_info = data["result"]
         self.dir_contents = []
         dirs = []
         for item in dir_info["dirs"]:
             if not item["dirname"].startswith("."):
-                dirs.append({
-                    "type": "dir",
-                    "path": self._build_path(self.current_dir, item["dirname"]),
-                    "size": item["size"],
-                    "modified": item["modified"],
-                    "name": item["dirname"]
-                })
+                dirs.append(
+                    {
+                        "type": "dir",
+                        "path": self._build_path(self.current_dir, item["dirname"]),
+                        "size": item["size"],
+                        "modified": item["modified"],
+                        "name": item["dirname"],
+                    }
+                )
         files = []
         for item in dir_info["files"]:
             if item["filename"].endswith(".gcode"):
-                files.append({
-                    "type": "file",
-                    "path": self._build_path(self.current_dir, item["filename"]),
-                    "size": item["size"],
-                    "modified": item["modified"],
-                    "name": build_format_filename()(item["filename"])
-                })
+                files.append(
+                    {
+                        "type": "file",
+                        "path": self._build_path(self.current_dir, item["filename"]),
+                        "size": item["size"],
+                        "modified": item["modified"],
+                        "name": build_format_filename()(item["filename"]),
+                    }
+                )
         sort_folders_first = True
         if "files" in self.config:
-            sort_folders_first = self.config["files"].getboolean("sort_folders_first", fallback=True)
+            sort_folders_first = self.config["files"].getboolean(
+                "sort_folders_first", fallback=True
+            )
         if sort_folders_first:
-            self.dir_contents = self.sort_dir_contents(dirs) + self.sort_dir_contents(files)
+            self.dir_contents = self.sort_dir_contents(dirs) + self.sort_dir_contents(
+                files
+            )
         else:
             self.dir_contents = self.sort_dir_contents(dirs + files)
-        await self.display.show_files_page(self.current_dir, self.dir_contents, self.files_page)
+        await self.display.show_files_page(
+            self.current_dir, self.dir_contents, self.files_page
+        )
 
     def _page_id(self, page):
         return self.display.mapper.map_page(page)
@@ -590,7 +771,9 @@ class DisplayController:
             while len(self.history) > 1 and self.history[-1] in TRANSITION_PAGES:
                 self.history.pop()
             back_page = self.history[-1]
-            self._loop.create_task(self.display.navigate_to(self.display.mapper.map_page(back_page)))
+            self._loop.create_task(
+                self.display.navigate_to(self.display.mapper.map_page(back_page))
+            )
             logger.debug(f"Navigating back to {back_page}")
             self._loop.create_task(self.special_page_handling(back_page))
         else:
@@ -603,27 +786,37 @@ class DisplayController:
         await self.display.connect()
         await self.display.check_valid_version()
         await self.connect_moonraker()
-        ret = await self._send_moonraker_request("printer.objects.subscribe", {"objects": {
-            "gcode_move": ["extrude_factor", "speed_factor", "homing_origin"],
-            "motion_report": ["live_position", "live_velocity"],
-            "fan": ["speed"],
-            "heater_bed": ["temperature", "target"],
-            "extruder": ["temperature", "target"],
-            "heater_generic heater_bed_outer": ["temperature", "target"],
-            "display_status": ["progress"],
-            "print_stats": ["state", "print_duration", "filename", "total_duration", "info"],
-            "output_pin Part_Light": ["value"],
-            "output_pin Frame_Light": ["value"],
-            "configfile": ["config"],
-            f"filament_switch_sensor {self.filament_sensor_name}": ["enabled"]
-        }})
+        ret = await self._send_moonraker_request(
+            "printer.objects.subscribe",
+            {
+                "objects": {
+                    "gcode_move": ["extrude_factor", "speed_factor", "homing_origin"],
+                    "motion_report": ["live_position", "live_velocity"],
+                    "fan": ["speed"],
+                    "heater_bed": ["temperature", "target"],
+                    "extruder": ["temperature", "target"],
+                    "heater_generic heater_bed_outer": ["temperature", "target"],
+                    "display_status": ["progress"],
+                    "print_stats": [
+                        "state",
+                        "print_duration",
+                        "filename",
+                        "total_duration",
+                        "info",
+                    ],
+                    "output_pin Part_Light": ["value"],
+                    "output_pin Frame_Light": ["value"],
+                    "configfile": ["config"],
+                    f"filament_switch_sensor {self.filament_sensor_name}": ["enabled"],
+                }
+            },
+        )
         data = ret["result"]["status"]
         logger.info("Printer Model: " + str(self.display.get_device_name()))
         await self.display.initialize_display()
         self.handle_status_update(data)
 
-    async def _send_moonraker_request(
-        self, method, params=None):
+    async def _send_moonraker_request(self, method, params=None):
         if params is None:
             params = {}
         message = self._make_rpc_msg(method, **params)
@@ -654,23 +847,33 @@ class DisplayController:
         logger.info(f"Connecting to Moonraker at {sockpath}")
         while True:
             try:
-                reader, writer = await asyncio.open_unix_connection(sockpath, limit=SOCKET_LIMIT)
+                reader, writer = await asyncio.open_unix_connection(
+                    sockpath, limit=SOCKET_LIMIT
+                )
                 self.writer = writer
                 self._loop.create_task(self._process_stream(reader))
                 self.connected = True
                 logger.info("Connected to Moonraker")
 
                 try:
-                    software_version_response = await self._send_moonraker_request("printer.info")
-                    software_version = software_version_response["result"]["software_version"]
-                    software_version = "-".join(software_version.split("-")[:2]) # clean up version string
+                    software_version_response = await self._send_moonraker_request(
+                        "printer.info"
+                    )
+                    software_version = software_version_response["result"][
+                        "software_version"
+                    ]
+                    software_version = "-".join(
+                        software_version.split("-")[:2]
+                    )  # clean up version string
                     # Process the software_version...
                     logger.info(f"Software Version: {software_version}")
                     await self.display.update_klipper_version_ui(software_version)
                     break
 
                 except KeyError:
-                    logger.error("KeyError encountered in software_version_response. Attempting to reconnect.")
+                    logger.error(
+                        "KeyError encountered in software_version_response. Attempting to reconnect."
+                    )
                     await asyncio.sleep(5)  # Wait before reconnecting
                     continue  # Retry the connection loop
 
@@ -681,15 +884,22 @@ class DisplayController:
                 await asyncio.sleep(5)  # Wait before reconnecting
                 continue
 
-        ret = await self._send_moonraker_request("server.connection.identify", {
+        ret = await self._send_moonraker_request(
+            "server.connection.identify",
+            {
                 "client_name": "OpenNept4une Display Connector",
                 "version": "0.0.1",
                 "type": "other",
-                "url": "https://github.com/halfbearman/opennept4une"
-            })
-        logger.debug(f"Client Identified With Moonraker: {ret['result']['connection_id']}")
+                "url": "https://github.com/halfbearman/opennept4une",
+            },
+        )
+        logger.debug(
+            f"Client Identified With Moonraker: {ret['result']['connection_id']}"
+        )
 
-        system = (await self._send_moonraker_request("machine.system_info"))["result"]["system_info"]
+        system = (await self._send_moonraker_request("machine.system_info"))["result"][
+            "system_info"
+        ]
         self.display.ips = ", ".join(self._find_ips(system["network"]))
 
     def _make_rpc_msg(self, method: str, **kwargs):
@@ -714,7 +924,9 @@ class DisplayController:
     def handle_input(self, page, component, value):
         if page in input_actions:
             if component in input_actions[page]:
-                self.execute_action(input_actions[page][component].replace("$", str(value)))
+                self.execute_action(
+                    input_actions[page][component].replace("$", str(value))
+                )
                 return
         logger.info(f"Unhandled Input: {page} {component} {value}")
 
@@ -747,16 +959,14 @@ class DisplayController:
         else:
             logger.info(f"Unhandled Event: {type} {data}")
 
-    async def _process_stream(
-        self, reader: asyncio.StreamReader
-    ) -> None:
+    async def _process_stream(self, reader: asyncio.StreamReader) -> None:
         errors_remaining: int = 10
         while not reader.at_eof():
             if self.klipper_restart_event.is_set():
                 await self._attempt_reconnect()
                 self.klipper_restart_event.clear()
             try:
-                data = await reader.readuntil(b'\x03')
+                data = await reader.readuntil(b"\x03")
                 decoded = data[:-1].decode(encoding="utf-8")
                 item = json.loads(decoded)
             except (ConnectionError, asyncio.IncompleteReadError):
@@ -795,7 +1005,9 @@ class DisplayController:
                     max_z = int(new_data["config"]["stepper_z"]["position_max"])
 
             if max_x > 0 and max_y > 0 and max_z > 0:
-                self._loop.create_task(self.display.update_machine_size_ui(max_x, max_y, max_z))
+                self._loop.create_task(
+                    self.display.update_machine_size_ui(max_x, max_y, max_z)
+                )
             if "bed_mesh" in new_data["config"]:
                 if "probe_count" in new_data["config"]["bed_mesh"]:
                     parts = new_data["config"]["bed_mesh"]["probe_count"].split(",")
@@ -816,10 +1028,14 @@ class DisplayController:
         metadata = await self.load_metadata(filename)
         await self.display.set_data_prepare_screen(filename, metadata)
 
-        await self.load_thumbnail_for_page(filename, self._page_id(PAGE_CONFIRM_PRINT), metadata)
+        await self.load_thumbnail_for_page(
+            filename, self._page_id(PAGE_CONFIRM_PRINT), metadata
+        )
 
     async def load_metadata(self, filename):
-        metadata = await self._send_moonraker_request("server.files.metadata", {"filename": filename})
+        metadata = await self._send_moonraker_request(
+            "server.files.metadata", {"filename": filename}
+        )
         return metadata["result"]
 
     async def load_thumbnail_for_page(self, filename, page_number, metadata=None):
@@ -843,7 +1059,9 @@ class DisplayController:
             path = path + "/"
         path += best_thumbnail["relative_path"]
 
-        img = requests.get("http://localhost/server/files/gcodes/" + pathname2url(path), timeout=5)
+        img = requests.get(
+            "http://localhost/server/files/gcodes/" + pathname2url(path), timeout=5
+        )
         thumbnail = Image.open(io.BytesIO(img.content))
         background = "29354a"
         if "thumbnails" in self.config:
@@ -860,7 +1078,9 @@ class DisplayController:
                 filename = new_data["print_stats"]["filename"]
                 self.current_filename = filename
                 if filename is not None and filename != "":
-                    self._loop.create_task(self.load_thumbnail_for_page(self.current_filename, "19"))
+                    self._loop.create_task(
+                        self.load_thumbnail_for_page(self.current_filename, "19")
+                    )
             if "state" in new_data["print_stats"]:
                 state = new_data["print_stats"]["state"]
                 self.current_state = state
@@ -874,27 +1094,71 @@ class DisplayController:
                     if current_page is None or current_page != PAGE_PRINTING_COMPLETE:
                         self._navigate_to_page(PAGE_PRINTING_COMPLETE)
                 else:
-                    if current_page is None or current_page in PRINTING_PAGES or current_page == PAGE_PRINTING_COMPLETE or current_page == PAGE_OVERLAY_LOADING:
+                    if (
+                        current_page is None
+                        or current_page in PRINTING_PAGES
+                        or current_page == PAGE_PRINTING_COMPLETE
+                        or current_page == PAGE_OVERLAY_LOADING
+                    ):
                         self._navigate_to_page(PAGE_MAIN, clear_history=True)
 
             if "print_duration" in new_data["print_stats"]:
                 self.current_print_duration = new_data["print_stats"]["print_duration"]
 
-            if "display_status" in new_data and "progress" in new_data["display_status"] and "print_duration" in new_data["print_stats"]:
+            if (
+                "display_status" in new_data
+                and "progress" in new_data["display_status"]
+                and "print_duration" in new_data["print_stats"]
+            ):
                 if new_data["display_status"]["progress"] > 0:
-                    total_time = new_data["print_stats"]["print_duration"] / new_data["display_status"]["progress"]
-                    self._loop.create_task(self.display.update_time_remaining(format_time(total_time - new_data["print_stats"]["print_duration"])))
+                    total_time = (
+                        new_data["print_stats"]["print_duration"]
+                        / new_data["display_status"]["progress"]
+                    )
+                    self._loop.create_task(
+                        self.display.update_time_remaining(
+                            format_time(
+                                total_time - new_data["print_stats"]["print_duration"]
+                            )
+                        )
+                    )
 
-        if "output_pin Part_Light" in new_data and new_data["output_pin Part_Light"]["value"] != None:
+        if (
+            "output_pin Part_Light" in new_data
+            and new_data["output_pin Part_Light"]["value"] is not None
+        ):
             self.part_light_state = int(new_data["output_pin Part_Light"]["value"]) == 1
-        if "output_pin Frame_Light" in new_data and new_data["output_pin Frame_Light"]["value"] != None:
-            self.part_light_state = int(new_data["output_pin Frame_Light"]["value"]) == 1
+        if (
+            "output_pin Frame_Light" in new_data
+            and new_data["output_pin Frame_Light"]["value"] is not None
+        ):
+            self.part_light_state = (
+                int(new_data["output_pin Frame_Light"]["value"]) == 1
+            )
         if "fan" in new_data:
             self.fan_state = float(new_data["fan"]["speed"]) > 0
             self.printing_target_speeds["fan"] = float(new_data["fan"]["speed"])
-            self._loop.create_task(self.display.update_printing_speed_settings_ui(self.printing_selected_speed_type, self.printing_target_speeds[self.printing_selected_speed_type]))
-        if f"filament_switch_sensor {self.filament_sensor_name}" in new_data and new_data[f"filament_switch_sensor {self.filament_sensor_name}"]["enabled"] != None:
-            self.filament_sensor_state = int(new_data[f"filament_switch_sensor {self.filament_sensor_name}"]["enabled"]) == 1
+            self._loop.create_task(
+                self.display.update_printing_speed_settings_ui(
+                    self.printing_selected_speed_type,
+                    self.printing_target_speeds[self.printing_selected_speed_type],
+                )
+            )
+        if (
+            f"filament_switch_sensor {self.filament_sensor_name}" in new_data
+            and new_data[f"filament_switch_sensor {self.filament_sensor_name}"][
+                "enabled"
+            ]
+            is not None
+        ):
+            self.filament_sensor_state = (
+                int(
+                    new_data[f"filament_switch_sensor {self.filament_sensor_name}"][
+                        "enabled"
+                    ]
+                )
+                == 1
+            )
         if "configfile" in new_data:
             self.handle_machine_config_change(new_data["configfile"])
 
@@ -903,18 +1167,36 @@ class DisplayController:
                 self.printing_target_temps["extruder"] = new_data["extruder"]["target"]
         if "heater_generic heater_bed" in new_data:
             if "target" in new_data["heater_bed"]:
-                self.printing_target_temps["heater_bed"] = new_data["heater_generic heater_bed"]["target"]
+                self.printing_target_temps["heater_bed"] = new_data[
+                    "heater_generic heater_bed"
+                ]["target"]
         if "heater_generic heater_bed_outer" in new_data:
             if "target" in new_data["heater_generic heater_bed_outer"]:
-                self.printing_target_temps["heater_bed_outer"] = new_data["heater_generic heater_bed_outer"]["target"]
+                self.printing_target_temps["heater_bed_outer"] = new_data[
+                    "heater_generic heater_bed_outer"
+                ]["target"]
 
         if "gcode_move" in new_data:
             if "extrude_factor" in new_data["gcode_move"]:
-                self.printing_target_speeds["flow"] = float(new_data["gcode_move"]["extrude_factor"])
-                self._loop.create_task(self.display.update_printing_speed_settings_ui(self.printing_selected_speed_type, self.printing_target_speeds[self.printing_selected_speed_type]))
+                self.printing_target_speeds["flow"] = float(
+                    new_data["gcode_move"]["extrude_factor"]
+                )
+                self._loop.create_task(
+                    self.display.update_printing_speed_settings_ui(
+                        self.printing_selected_speed_type,
+                        self.printing_target_speeds[self.printing_selected_speed_type],
+                    )
+                )
             if "speed_factor" in new_data["gcode_move"]:
-                self.printing_target_speeds["print"] = float(new_data["gcode_move"]["speed_factor"])
-                self._loop.create_task(self.display.update_printing_speed_settings_ui(self.printing_selected_speed_type, self.printing_target_speeds[self.printing_selected_speed_type]))
+                self.printing_target_speeds["print"] = float(
+                    new_data["gcode_move"]["speed_factor"]
+                )
+                self._loop.create_task(
+                    self.display.update_printing_speed_settings_ui(
+                        self.printing_selected_speed_type,
+                        self.printing_target_speeds[self.printing_selected_speed_type],
+                    )
+                )
 
         self._loop.create_task(self.display.update_data(new_data, data_mapping))
 
@@ -929,7 +1211,9 @@ class DisplayController:
         self.leveling_mode = "screw"
         self.screw_levels = {}
         self.screw_probe_count = 0
-        await self._send_moonraker_request("printer.gcode.script", {"script": "BED_LEVEL_SCREWS_TUNE"})
+        await self._send_moonraker_request(
+            "printer.gcode.script", {"script": "BED_LEVEL_SCREWS_TUNE"}
+        )
         await self.display.draw_completed_screw_leveling(self.screw_levels)
 
     async def handle_zprobe_leveling(self):
@@ -939,22 +1223,34 @@ class DisplayController:
         self.z_probe_step = "0.1"
         self.z_probe_distance = "0.0"
         self._navigate_to_page(PAGE_OVERLAY_LOADING)
-        await self._send_moonraker_request("printer.gcode.script", {"script": "CALIBRATE_PROBE_Z_OFFSET"})
+        await self._send_moonraker_request(
+            "printer.gcode.script", {"script": "CALIBRATE_PROBE_Z_OFFSET"}
+        )
         self._go_back()
 
     def handle_gcode_response(self, response):
         if self.leveling_mode == "screw":
             if "probe at" in response:
                 self.screw_probe_count += 1
-                self._loop.create_task(self.display.update_screw_level_description(f"Probing Screws ({ceil(self.screw_probe_count/2)}/4)..."))
+                self._loop.create_task(
+                    self.display.update_screw_level_description(
+                        f"Probing Screws ({ceil(self.screw_probe_count/2)}/4)..."
+                    )
+                )
             if "screw (base) :" in response:
                 self.screw_levels[response.split("screw")[0][3:].strip()] = "base"
             if "screw :" in response:
-                self.screw_levels[response.split("screw")[0][3:].strip()] = response.split("adjust")[1].strip()
+                self.screw_levels[
+                    response.split("screw")[0][3:].strip()
+                ] = response.split("adjust")[1].strip()
         elif self.leveling_mode == "zprobe":
             if "Z position:" in response:
                 self.z_probe_distance = response.split("->")[1].split("<-")[0].strip()
-                self._loop.create_task(self.display.update_zprobe_leveling_ui(self.z_probe_step, self.z_probe_distance))
+                self._loop.create_task(
+                    self.display.update_zprobe_leveling_ui(
+                        self.z_probe_step, self.z_probe_distance
+                    )
+                )
         elif "Adapted probe count:" in response:
             parts = response.split(":")[1].split(",")
             x_count = int(parts[0].strip(" ()"))
@@ -972,10 +1268,26 @@ class DisplayController:
             if self.bed_leveling_last_position != new_position:
                 self.bed_leveling_last_position = new_position
                 if self.bed_leveling_probed_count > 0:
-                    self._loop.create_task(self.display.draw_kamp_box_index(self.bed_leveling_probed_count - 1, BACKGROUND_SUCCESS, self.bed_leveling_counts))
+                    self._loop.create_task(
+                        self.display.draw_kamp_box_index(
+                            self.bed_leveling_probed_count - 1,
+                            BACKGROUND_SUCCESS,
+                            self.bed_leveling_counts,
+                        )
+                    )
                 self.bed_leveling_probed_count += 1
-                self._loop.create_task(self.display.draw_kamp_box_index(self.bed_leveling_probed_count - 1, BACKGROUND_WARNING, self.bed_leveling_counts))
-                self._loop.create_task(self.display.update_kamp_text(f"Probing... ({self.bed_leveling_probed_count}/{self.bed_leveling_counts[0]*self.bed_leveling_counts[1]})"))
+                self._loop.create_task(
+                    self.display.draw_kamp_box_index(
+                        self.bed_leveling_probed_count - 1,
+                        BACKGROUND_WARNING,
+                        self.bed_leveling_counts,
+                    )
+                )
+                self._loop.create_task(
+                    self.display.update_kamp_text(
+                        f"Probing... ({self.bed_leveling_probed_count}/{self.bed_leveling_counts[0]*self.bed_leveling_counts[1]})"
+                    )
+                )
         elif response.startswith("// Mesh Bed Leveling Complete"):
             self.bed_leveling_probed_count = 0
             self.bed_leveling_counts = self.full_bed_leveling_counts
@@ -984,6 +1296,7 @@ class DisplayController:
                     self._loop.create_task(self.display.show_bed_mesh_final())
                 else:
                     self._go_back()
+
 
 loop = asyncio.get_event_loop()
 config_observer = Observer()
@@ -999,16 +1312,22 @@ try:
 
     def handle_sock_changes(notifier):
         if notifier.event_type == "created":
-            logger.info(f"{notifier.src_path.split('/')[-1]} created. Attempting to reconnect...")
+            logger.info(
+                f"{notifier.src_path.split('/')[-1]} created. Attempting to reconnect..."
+            )
             controller.klipper_restart_event.set()
 
     config_patterns = ["display_connector.cfg"]
-    config_event_handler = PatternMatchingEventHandler(config_patterns, None, True, True)
+    config_event_handler = PatternMatchingEventHandler(
+        config_patterns, None, True, True
+    )
     config_event_handler.on_modified = handle_wd_callback
     config_event_handler.on_created = handle_wd_callback
 
     socket_patterns = ["klippy.sock", "moonraker.sock"]
-    socket_event_handler = PatternMatchingEventHandler(socket_patterns, None, True, True)
+    socket_event_handler = PatternMatchingEventHandler(
+        socket_patterns, None, True, True
+    )
     socket_event_handler.on_modified = handle_sock_changes
     socket_event_handler.on_created = handle_sock_changes
     socket_event_handler.on_deleted = handle_sock_changes

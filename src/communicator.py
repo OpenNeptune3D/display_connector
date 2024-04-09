@@ -48,7 +48,7 @@ class DisplayCommunicator:
             )
             return False
         return True
-    
+
     def get_device_name(self):
         return self.model
 
@@ -61,7 +61,7 @@ class DisplayCommunicator:
         if index < len(path):
             return None
         return current
-    
+
     async def navigate_to(self, page_id):
         await self.write(f"page {page_id}")
 
@@ -89,7 +89,9 @@ class DisplayCommunicator:
                                 self.get_current_data(required_field)
                                 for required_field in mapping_leaf.required_fields
                             ]
-                            formatted = mapping_leaf.format_with_required(value, *required_values)
+                            formatted = mapping_leaf.format_with_required(
+                                value, *required_values
+                            )
                         for mapped_key in mapping_leaf.fields:
                             if mapping_leaf.field_type == "txt":
                                 await self.write(
