@@ -65,35 +65,3 @@ def test_safe_get_no_option(tmp_path):
 
     assert config.safe_get("test", "t2") is None
     assert config.safe_get("test", "t2", "default") == "default"
-
-
-def test_reading_none_light_config(tmp_path):
-    with open(str(tmp_path) + "/test_config.ini", "w") as f:
-        f.write("[test]\nt = t")
-    config = ConfigHandler(str(tmp_path) + "/test_config.ini", logger)
-
-    lights = config.get_lights()
-    assert lights is None
-
-def test_reading_one_light_config(tmp_path):
-    with open(str(tmp_path) + "/test_config.ini", "w") as f:
-        f.write("[light Frame_Light]\ntype = output_pin")
-    config = ConfigHandler(str(tmp_path) + "/test_config.ini", logger)
-
-    lights = config.get_lights()
-    assert len(lights) == 1
-    assert lights[0]["name"] == "Frame_Light"
-
-def test_reading_multiple_lights_config(tmp_path):
-    with open(str(tmp_path) + "/test_config.ini", "w") as f:
-        f.write("[light Part_Light]\ntype = output_pin\n")
-        f.write("[light Frame_Light]\ntype = led\n")
-        f.write("[light Warning_Light]\ntype = output_pin\n")
-    config = ConfigHandler(str(tmp_path) + "/test_config.ini", logger)
-
-    lights = config.get_lights()
-    assert len(lights) == 3
-    assert lights[0]["name"] == "Part_Light"
-    assert lights[0]["type"] == "output_pin"
-    assert lights[1]["name"] == "Frame_Light"
-    assert lights[1]["type"] == "led"

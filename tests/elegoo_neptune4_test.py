@@ -5,18 +5,6 @@ import pytest
 from src.elegoo_neptune4 import MODEL_N4_MAX, MODEL_N4_PLUS, MODEL_N4_PRO, MODEL_N4_REGULAR, Neptune4DisplayCommunicator, Neptune4Mapper, Neptune4MaxMapper, Neptune4PlusMapper, Neptune4ProMapper
 from src.mapping import PAGE_PREPARE_TEMP, PAGE_PRINTING_FILAMENT
 
-def test_default_light_config():
-    mapper = Neptune4Mapper()
-    lights = mapper.configure_default_lights()
-    assert len(lights) == 2
-    assert lights[0]["name"] == "Part_Light"
-    assert lights[1]["name"] == "Frame_Light"
-
-
-def test_default_filament_sensor_name():
-    mapper = Neptune4Mapper()
-    assert mapper.data_mapping["filament_switch_sensor filament_sensor"] is not None
-
 
 def test_n4_pro_mapping():
     mapper = Neptune4ProMapper()

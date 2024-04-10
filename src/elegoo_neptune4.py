@@ -103,7 +103,7 @@ class Neptune4DisplayCommunicator(ElegooDisplayCommunicator):
         logger: Logger,
         model: str,
         event_handler,
-        port: str,
+        port: str = None,
         baudrate: int = 115200,
         timeout: int = 5,
     ) -> None:
