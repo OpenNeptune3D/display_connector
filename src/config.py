@@ -1,5 +1,5 @@
 import os
-from configparser import ConfigParser
+from configparser import ConfigParser, NoOptionError, NoSectionError
 
 TEMP_DEFAULTS = {
     "pla": [210, 60],
@@ -33,6 +33,11 @@ class ConfigHandler(ConfigParser):
             return self.get(section, key)
         except KeyError:
             return default
+        except NoSectionError:
+            return default
+        except NoOptionError:
+            return default
+        
 
     def initialize_config_file(self):
         if not os.path.exists(self.file_path):

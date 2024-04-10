@@ -42,6 +42,31 @@ def test_does_not_overwrite_existing_config(tmp_path):
     with open(str(tmp_path) + "/test_config.ini", "r") as f:
         assert "[test]\ntest = test" in f.read()
 
+def test_safe_get(tmp_path):
+    with open(str(tmp_path) + "/test_config.ini", "w") as f:
+        f.write("[test]\nt = t")
+    config = ConfigHandler(str(tmp_path) + "/test_config.ini", logger)
+
+    assert config.safe_get("test", "t") == "t"
+    assert config.safe_get("test", "t", "default") == "t"
+
+def test_safe_get_no_section(tmp_path):
+    with open(str(tmp_path) + "/test_config.ini", "w") as f:
+        f.write("[test2]\nt = t")
+    config = ConfigHandler(str(tmp_path) + "/test_config.ini", logger)
+
+    assert config.safe_get("test", "t2") is None
+    assert config.safe_get("test", "t2", "default") == "default"
+
+def test_safe_get_no_option(tmp_path):
+    with open(str(tmp_path) + "/test_config.ini", "w") as f:
+        f.write("[test]\nt = t")
+    config = ConfigHandler(str(tmp_path) + "/test_config.ini", logger)
+
+    assert config.safe_get("test", "t2") is None
+    assert config.safe_get("test", "t2", "default") == "default"
+
+
 def test_reading_none_light_config(tmp_path):
     with open(str(tmp_path) + "/test_config.ini", "w") as f:
         f.write("[test]\nt = t")
