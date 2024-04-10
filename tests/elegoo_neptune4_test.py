@@ -26,27 +26,27 @@ def test_n4_pro_mapping():
 
 def test_get_mapper_4():
     communicator = Neptune4DisplayCommunicator(None, MODEL_N4_REGULAR, None)
-    assert type(communicator.mapper) == type(Neptune4Mapper())
+    assert isinstance(communicator.mapper, Neptune4Mapper)
 
 
 def test_get_mapper_pro():
     communicator = Neptune4DisplayCommunicator(None, MODEL_N4_PRO, None)
-    assert type(communicator.mapper) == type(Neptune4ProMapper())
+    assert isinstance(communicator.mapper, Neptune4ProMapper)
 
 
 def test_get_mapper_plus():
     communicator = Neptune4DisplayCommunicator(None, MODEL_N4_PLUS, None)
-    assert type(communicator.mapper) == type(Neptune4PlusMapper())
+    assert isinstance(communicator.mapper, Neptune4PlusMapper)
 
 
 def test_get_mapper_max():
     communicator = Neptune4DisplayCommunicator(None, MODEL_N4_MAX, None)
-    assert type(communicator.mapper) == type(Neptune4MaxMapper())
+    assert isinstance(communicator.mapper, Neptune4MaxMapper)
 
 
 def test_get_mapper_invalid():
     communicator = Neptune4DisplayCommunicator(logging, "abc", None)
-    assert type(communicator.mapper) == type(Neptune4Mapper())
+    assert isinstance(communicator.mapper, Neptune4Mapper)
 
 
 @pytest.mark.asyncio
