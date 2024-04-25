@@ -441,7 +441,7 @@ class DisplayController:
                 + str(
                     current_temp
                     + (
-                        int(direction + self.printing_selected_temp_increment)
+                        int(self.printing_selected_temp_increment)
                         * (1 if direction == "+" else -1)
                     )
                 )
@@ -1163,16 +1163,19 @@ class DisplayController:
         if "extruder" in new_data:
             if "target" in new_data["extruder"]:
                 self.printing_target_temps["extruder"] = new_data["extruder"]["target"]
+                self.printer_heating_value_changed("extruder", new_data["extruder"]["temperature"])
         if "heater_generic heater_bed" in new_data:
             if "target" in new_data["heater_bed"]:
                 self.printing_target_temps["heater_bed"] = new_data[
                     "heater_generic heater_bed"
                 ]["target"]
+                self.printer_heating_value_changed("heater_bed", new_data["heater_generic heater_bed"]["temperature"])
         if "heater_generic heater_bed_outer" in new_data:
             if "target" in new_data["heater_generic heater_bed_outer"]:
                 self.printing_target_temps["heater_bed_outer"] = new_data[
                     "heater_generic heater_bed_outer"
                 ]["target"]
+                self.printer_heating_value_changed("heater_bed_outer", new_data["heater_generic heater_bed_outer"]["temperature"])
 
         if "gcode_move" in new_data:
             if "extrude_factor" in new_data["gcode_move"]:
@@ -1197,6 +1200,15 @@ class DisplayController:
                 )
 
         self._loop.create_task(self.display.update_data(new_data, data_mapping))
+
+    def printer_heating_value_changed(self, heater, new_value):
+            if heater == self.printing_selected_heater:
+                self._loop.create_task(
+                    self.display.update_printing_heater_settings_ui(
+                        self.printing_selected_heater,
+                        new_value,
+                    )
+                )
 
     async def close(self):
         if not self.connected:
