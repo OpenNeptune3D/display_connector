@@ -686,7 +686,8 @@ class DisplayController:
         elif speed_type == "flow":
             self.send_gcode(f"M221 S{new_speed:.0f}")
         elif speed_type == "fan":
-            self.send_gcode(f"SET_FAN_SPEED FAN=fan SPEED={new_speed}")
+            value = min(max(int((new_speed / 100) * 255), 0), 255)
+            self.send_gcode(f"M106 S{value}")
 
     def _toggle_fan(self, state):
         gcode = f"M106 S{'255' if state else '0'}"
