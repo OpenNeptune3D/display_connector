@@ -205,7 +205,6 @@ class DisplayController:
                 self.filament_sensor_name = self.config["general"][
                     "filament_sensor_name"
                 ]
-                self.display.mapper.set_filament_sensor_name(self.filament_sensor_name)
 
         if "LOGGING" in self.config:
             if "file_log_level" in self.config["LOGGING"]:
@@ -223,6 +222,7 @@ class DisplayController:
             self.extrude_speed = prepare.getint("extrude_speed", fallback=5)
 
     def _handle_display_config(self):
+        self.display.mapper.set_filament_sensor_name(self.filament_sensor_name)
         if "main_screen" in self.config:
             if "display_name" in self.config["main_screen"]:
                 self.display.display_name_override = self.config["main_screen"][
