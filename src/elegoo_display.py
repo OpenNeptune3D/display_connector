@@ -320,7 +320,6 @@ class ElegooDisplayMapper(Mapper):
                 )
             ]
         }
-        print(self.data_mapping)
 
 
 class ElegooDisplayCommunicator(DisplayCommunicator):

@@ -932,10 +932,8 @@ class DisplayController:
 
     def handle_custom_touch(self, x, y):
         if self._get_current_page() in custom_touch_actions:
-            print(x, y)
             actions = custom_touch_actions[self._get_current_page()]
             for key in actions:
-                print(key)
                 min_x, min_y, max_x, max_y = key
                 if min_x < x and x < max_x and min_y < y and y < max_y:
                     self.execute_action(actions[key])
