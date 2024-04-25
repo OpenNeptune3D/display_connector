@@ -418,7 +418,7 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
                 + str(90 if printing_selected_heater == "heater_bed_outer" else 89)
             )
             await self.write(
-                f"p[{self.mapper.map_page(PAGE_PRINTING_FILAMENT)}].targettemp.val=\""
+                f"p[{self.mapper.map_page(PAGE_PRINTING_FILAMENT)}].targettemp.txt=\""
                 + f"{printing_target_temp:.0f}\""
             )
 
