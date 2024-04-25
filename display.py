@@ -1267,6 +1267,7 @@ class DisplayController:
             y_count = int(parts[1][:-1].strip(" ()"))
             self.bed_leveling_counts = [x_count, y_count]
         elif response.startswith("// bed_mesh: generated points"):
+            self.bed_leveling_probed_count = 0
             if self._get_current_page() != PAGE_PRINTING_KAMP:
                 self._navigate_to_page(PAGE_PRINTING_KAMP)
         elif response.startswith("// probe at "):
