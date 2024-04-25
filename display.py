@@ -1163,19 +1163,19 @@ class DisplayController:
         if "extruder" in new_data:
             if "target" in new_data["extruder"]:
                 self.printing_target_temps["extruder"] = new_data["extruder"]["target"]
-                self.printer_heating_value_changed("extruder", new_data["extruder"]["temperature"])
+                self.printer_heating_value_changed("extruder", new_data["extruder"]["target"])
         if "heater_generic heater_bed" in new_data:
             if "target" in new_data["heater_bed"]:
                 self.printing_target_temps["heater_bed"] = new_data[
                     "heater_generic heater_bed"
                 ]["target"]
-                self.printer_heating_value_changed("heater_bed", new_data["heater_generic heater_bed"]["temperature"])
+                self.printer_heating_value_changed("heater_bed", new_data["heater_generic heater_bed"]["target"])
         if "heater_generic heater_bed_outer" in new_data:
             if "target" in new_data["heater_generic heater_bed_outer"]:
                 self.printing_target_temps["heater_bed_outer"] = new_data[
                     "heater_generic heater_bed_outer"
                 ]["target"]
-                self.printer_heating_value_changed("heater_bed_outer", new_data["heater_generic heater_bed_outer"]["temperature"])
+                self.printer_heating_value_changed("heater_bed_outer", new_data["heater_generic heater_bed_outer"]["target"])
 
         if "gcode_move" in new_data:
             if "extrude_factor" in new_data["gcode_move"]:
