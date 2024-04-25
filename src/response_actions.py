@@ -193,8 +193,8 @@ response_actions = {
         5: "zoffset_-",
         7: "page " + PAGE_LIGHTS,
         8: "toggle_filament_sensor",
-        12: "page " + PAGE_PRINTING_FILAMENT,
-        13: "page " + PAGE_PRINTING_SPEED,
+        9: "page " + PAGE_PRINTING_FILAMENT,
+        10: "page " + PAGE_PRINTING_SPEED,
     },
     # Printing Speed
     135: {
