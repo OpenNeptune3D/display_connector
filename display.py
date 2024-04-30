@@ -413,6 +413,7 @@ class DisplayController:
         elif action == "files_picker":
             self._navigate_to_page(PAGE_FILES)
             self._loop.create_task(self._load_files())
+
         elif action.startswith("temp_heater_"):
             parts = action.split("_")
             self.printing_selected_heater = "_".join(parts[2:])
@@ -681,13 +682,23 @@ class DisplayController:
         self._go_back()
 
     def send_speed_update(self, speed_type, new_speed):
-        if speed_type == "print":
-            self.send_gcode(f"M220 S{new_speed:.0f}")
-        elif speed_type == "flow":
-            self.send_gcode(f"M221 S{new_speed:.0f}")
-        elif speed_type == "fan":
-            value = min(max(int((new_speed / 100) * 255), 0), 255)
-            self.send_gcode(f"M106 S{value}")
+        if new_speed != 1.0:                        
+            if speed_type == "print":
+                self.send_gcode(f"M220 S{new_speed:.0f}")
+            elif speed_type == "flow":
+                self.send_gcode(f"M221 S{new_speed:.0f}")
+            elif speed_type == "fan":
+                new_speed = int(new_speed)          
+                value = min(max(((new_speed) / 100) * 255, 0), 255) 
+                self.send_gcode(f"M106 S{value}")
+        else:                                       
+            if speed_type == "print":               
+                self.send_gcode("M220 S100")        
+            elif speed_type == "flow":              
+                self.send_gcode("M221 S100")        
+            elif speed_type == "fan":               
+                self.send_gcode("M106 S0")         
+        #edited for more stable print interface
 
     def _toggle_fan(self, state):
         gcode = f"M106 S{'255' if state else '0'}"
@@ -1165,12 +1176,12 @@ class DisplayController:
             if "target" in new_data["extruder"]:
                 self.printing_target_temps["extruder"] = new_data["extruder"]["target"]
                 self.printer_heating_value_changed("extruder", new_data["extruder"]["target"])
-        if "heater_generic heater_bed" in new_data:
-            if "target" in new_data["heater_bed"]:
+        if "heater_bed" in new_data: #remove heater_generic
+            if "target" in new_data["heater_bed"]: 
                 self.printing_target_temps["heater_bed"] = new_data[
-                    "heater_generic heater_bed"
+                    "heater_bed"
                 ]["target"]
-                self.printer_heating_value_changed("heater_bed", new_data["heater_generic heater_bed"]["target"])
+                self.printer_heating_value_changed("heater_bed", new_data["heater_bed"]["target"])
         if "heater_generic heater_bed_outer" in new_data:
             if "target" in new_data["heater_generic heater_bed_outer"]:
                 self.printing_target_temps["heater_bed_outer"] = new_data[
