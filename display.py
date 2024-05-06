@@ -1142,7 +1142,7 @@ class DisplayController:
             "output_pin Frame_Light" in new_data
             and new_data["output_pin Frame_Light"]["value"] is not None
         ):
-            self.part_light_state = (
+            self.frame_light_state  = (
                 int(new_data["output_pin Frame_Light"]["value"]) == 1
             )
         if "fan" in new_data:
