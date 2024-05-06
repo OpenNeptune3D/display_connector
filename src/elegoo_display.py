@@ -388,7 +388,7 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
             await self.write('b[12].txt="Leveling"')
             await self.write('b[18].txt="Screws Tilt Adjust"')
             await self.write('b[19].txt="Z-Probe Offset"')
-            await self.write('b[19].txt="Full Bed Level"')
+            await self.write('b[20].txt="Full Bed Level"')
             self.leveling_mode = None
         elif current_page == PAGE_PRINTING_DIALOG_SPEED:
             await self.write("b[3].maxval=200")
