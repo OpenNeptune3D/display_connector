@@ -1,5 +1,5 @@
 import os
-from configparser import ConfigParser
+from configparser import ConfigParser, NoOptionError, NoSectionError
 
 TEMP_DEFAULTS = {
     "pla": [210, 60],
@@ -28,6 +28,17 @@ class ConfigHandler(ConfigParser):
         with open(self.file_path, "w") as configfile:
             self.write(configfile)
 
+    def safe_get(self, section, key, default=None):
+        try:
+            return self.get(section, key)
+        except KeyError:
+            return default
+        except NoSectionError:
+            return default
+        except NoOptionError:
+            return default
+        
+
     def initialize_config_file(self):
         if not os.path.exists(self.file_path):
             self.logger.info("Creating config file")
@@ -35,7 +46,7 @@ class ConfigHandler(ConfigParser):
             self.set(
                 "general",
                 "clean_filename_regex",
-                ".*_(.*?_(?:[0-9]+h|[0-9]+m|[0-9]+s)+\.gcode)",
+                r".*_(.*?_(?:[0-9]+h|[0-9]+m|[0-9]+s)+\.gcode)",
             )
             self.add_section("LOGGING")
             self.set("LOGGING", "file_log_level", "ERROR")
@@ -89,4 +100,3 @@ class ConfigHandler(ConfigParser):
 
             with open(self.file_path, "w") as configfile:
                 self.write(configfile)
-

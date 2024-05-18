@@ -11,6 +11,7 @@ TJCStringInputPayload = namedtuple("String", "page_id component_id string")
 TJCNumericInputPayload = namedtuple("Numeric", "page_id component_id value")
 TJCTouchCoordinatePayload = namedtuple("TouchCoordinate", "x y touch_event")
 
+
 class EventType(IntEnum):
     TOUCH = 0x65  # Touch event
     TOUCH_COORDINATE = 0x67  # Touch coordinate

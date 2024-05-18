@@ -1,4 +1,25 @@
-from src.mapping import PAGE_PREPARE_MOVE, PAGE_PREPARE_TEMP, PAGE_PREPARE_EXTRUDER, PAGE_SETTINGS, PAGE_SETTINGS_LANGUAGE, PAGE_SETTINGS_TEMPERATURE, PAGE_SETTINGS_ABOUT, PAGE_SETTINGS_ADVANCED, PAGE_LEVELING, PAGE_LEVELING_SCREW_ADJUST, PAGE_LEVELING_Z_OFFSET_ADJUST, PAGE_PRINTING_STOP, PAGE_PRINTING_EMERGENCY_STOP, PAGE_PRINTING_FILAMENT, PAGE_PRINTING_SPEED, PAGE_PRINTING_ADJUST, PAGE_PRINTING_DIALOG_SPEED, PAGE_PRINTING_DIALOG_FLOW, PAGE_LIGHTS, PAGE_SHUTDOWN_DIALOG
+from src.mapping import (
+    PAGE_PREPARE_MOVE,
+    PAGE_PREPARE_TEMP,
+    PAGE_PREPARE_EXTRUDER,
+    PAGE_SETTINGS,
+    PAGE_SETTINGS_LANGUAGE,
+    PAGE_SETTINGS_TEMPERATURE,
+    PAGE_SETTINGS_ABOUT,
+    PAGE_SETTINGS_ADVANCED,
+    PAGE_LEVELING,
+    PAGE_LEVELING_SCREW_ADJUST,
+    PAGE_LEVELING_Z_OFFSET_ADJUST,
+    PAGE_PRINTING_STOP,
+    PAGE_PRINTING_EMERGENCY_STOP,
+    PAGE_PRINTING_FILAMENT,
+    PAGE_PRINTING_SPEED,
+    PAGE_PRINTING_ADJUST,
+    PAGE_PRINTING_DIALOG_SPEED,
+    PAGE_PRINTING_DIALOG_FLOW,
+    PAGE_LIGHTS,
+    PAGE_SHUTDOWN_DIALOG,
+)
 
 response_actions = {
     # Main
@@ -22,6 +43,7 @@ response_actions = {
     3: {
         7: "page " + PAGE_LEVELING_SCREW_ADJUST,
         8: "page " + PAGE_LEVELING_Z_OFFSET_ADJUST,
+        9: "begin_full_bed_level",
     },
     # Prepare Temperature (Pro Only)
     6: {
@@ -171,8 +193,8 @@ response_actions = {
         5: "zoffset_-",
         7: "page " + PAGE_LIGHTS,
         8: "toggle_filament_sensor",
-        12: "page " + PAGE_PRINTING_FILAMENT,
-        13: "page " + PAGE_PRINTING_SPEED,
+        9: "page " + PAGE_PRINTING_FILAMENT,
+        10: "page " + PAGE_PRINTING_SPEED,
     },
     # Printing Speed
     135: {
@@ -205,7 +227,7 @@ input_actions = {
     6: {
         0: "set_temp_extruder_$",
         1: "set_temp_heater_bed_$",
-        2: "set_temp_heater_bed_outer_$",
+        10: "set_temp_heater_bed_outer_$",
     },
     # Prepare Extruder
     9: {
@@ -235,7 +257,7 @@ custom_touch_actions = {
         (24, 104, 248, 154): "shutdown_host",
         (24, 158, 248, 208): "reboot_host",
         (24, 212, 248, 262): "reboot_klipper",
-
         (0, 0, 272, 480): "go_back",
-    }
+    },
+    "printing_kamp": {(40, 400, 230, 450): "save_config"},
 }
