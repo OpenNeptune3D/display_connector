@@ -1017,6 +1017,7 @@ class DisplayController:
                     max_z = int(new_data["config"]["stepper_z"]["position_max"])
 
             if max_x > 0 and max_y > 0 and max_z > 0:
+                logger.info(f"Machine Size: {max_x}x{max_y}x{max_z}")
                 self._loop.create_task(
                     self.display.update_machine_size_ui(max_x, max_y, max_z)
                 )
