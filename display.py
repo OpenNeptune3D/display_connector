@@ -497,7 +497,9 @@ class DisplayController:
                     ),
                 )
             )
-            self.display.show_files_page()
+            self._loop.create_task(
+            self.display.show_files_page(self.current_dir, self.dir_contents, self.files_page)
+            )
         elif action.startswith("open_file_"):
             parts = action.split("_")
             index = int(parts[2])
