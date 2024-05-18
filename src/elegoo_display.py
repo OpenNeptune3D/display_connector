@@ -376,6 +376,9 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
                 + str(BACKGROUND_GRAY)
                 + ',1,1,1,"github.com/OpenNeptune3D"'
             )
+        elif current_page == PAGE_LIGHTS:
+            await self.write("b[3].txt=\"Part Light\"")
+            await self.write("b[4].txt=\"Frame Light\"")
         elif current_page == PAGE_PRINTING:
             await self.write("printvalue.xcen=0")
             await self.write("move printvalue,13,267,13,267,0,10")
