@@ -303,7 +303,7 @@ class DisplayController:
             await self.display.draw_initial_screw_leveling()
             self._loop.create_task(self.handle_screw_leveling())
         elif current_page == PAGE_LEVELING_Z_OFFSET_ADJUST:
-            await self.display.draw_initial_zprobe_leveling()
+            await self.display.draw_initial_zprobe_leveling(self.z_probe_step, self.z_probe_distance)
             self._loop.create_task(self.handle_zprobe_leveling())
         elif current_page == PAGE_PRINTING_KAMP:
             await self.display.draw_kamp_page(self.bed_leveling_counts)
