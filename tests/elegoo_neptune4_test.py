@@ -2,7 +2,7 @@ import logging
 from unittest.mock import AsyncMock, call
 
 import pytest
-from src.elegoo_neptune4 import MODEL_N4_MAX, MODEL_N4_PLUS, MODEL_N4_PRO, MODEL_N4_REGULAR, Neptune4DisplayCommunicator, Neptune4Mapper, Neptune4MaxMapper, Neptune4PlusMapper, Neptune4ProMapper
+from display_connector.src.neptune4 import MODEL_N4_MAX, MODEL_N4_PLUS, MODEL_N4_PRO, MODEL_N4_REGULAR, Neptune4DisplayCommunicator, Neptune4Mapper, Neptune4MaxMapper, Neptune4PlusMapper, Neptune4ProMapper
 from src.mapping import PAGE_PREPARE_TEMP, PAGE_PRINTING_FILAMENT
 
 

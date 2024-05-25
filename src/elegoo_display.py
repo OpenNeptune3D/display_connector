@@ -550,23 +550,23 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
         ):
             file = dir_contents[index]
             await self.write(
-                f'{self.mapper.map_page(PAGE_FILES)}.b[{component_index + 18}.txt="{file["name"]}"'
+                f'{self.mapper.map_page(PAGE_FILES)}.b[{component_index + 18}].txt="{file["name"]}"'
             )
             if file["type"] == "dir":
                 await self.write(
-                    f"{self.mapper.map_page(PAGE_FILES)}.b[{component_index + 13}.pic=194"
+                    f"{self.mapper.map_page(PAGE_FILES)}.b[{component_index + 13}].pic=194"
                 )
             else:
                 await self.write(
-                    f"{self.mapper.map_page(PAGE_FILES)}.b[{component_index + 13}.pic=193"
+                    f"{self.mapper.map_page(PAGE_FILES)}.b[{component_index + 13}].pic=193"
                 )
             component_index += 1
         for index in range(component_index, page_size):
             await self.write(
-                f"{self.mapper.map_page(PAGE_FILES)}.b[{index + 13}.pic=195"
+                f"{self.mapper.map_page(PAGE_FILES)}.b[{index + 13}].pic=195"
             )
             await self.write(
-                f'{self.mapper.map_page(PAGE_FILES)}.b[{index + 18}.txt=""'
+                f'{self.mapper.map_page(PAGE_FILES)}.b[{index + 18}].txt=""'
             )
 
     async def update_printing_state_ui(self, state):

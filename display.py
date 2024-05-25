@@ -21,15 +21,16 @@ from src.tjc import EventType
 from src.response_actions import response_actions, input_actions, custom_touch_actions
 from src.lib_col_pic import parse_thumbnail
 from src.communicator import DisplayCommunicator
-from src.elegoo_neptune4 import (
+from src.neptune4 import (
     MODEL_N4_REGULAR,
     MODEL_N4_PRO,
     MODEL_N4_PLUS,
     MODEL_N4_MAX,
     MODELS_N4,
-    Neptune4DisplayCommunicator,
+    ElegooNeptune4DisplayCommunicator,
+    OpenNeptune4DisplayCommunicator
 )
-from src.elegoo_neptune3 import MODELS_N3, Neptune3DisplayCommunicator
+from src.elegoo_neptune3 import MODELS_N3, ElegooNeptune3DisplayCommunicator, OpenNeptune3DisplayCommunicator
 from src.elegoo_custom import MODEL_CUSTOM, CustomDisplayCommunicator
 from src.mapping import (
     build_format_filename,
@@ -99,13 +100,21 @@ TRANSITION_PAGES = [PAGE_OVERLAY_LOADING]
 SUPPORTED_PRINTERS = [MODEL_N4_REGULAR, MODEL_N4_PRO, MODEL_N4_PLUS, MODEL_N4_MAX]
 
 
-def get_communicator_for_model(model) -> DisplayCommunicator:
-    if model == MODEL_CUSTOM:
-        return CustomDisplayCommunicator
-    elif model in MODELS_N4:
-        return Neptune4DisplayCommunicator
-    elif model in MODELS_N3:
-        return Neptune3DisplayCommunicator
+def get_communicator(display, model) -> DisplayCommunicator:
+    if display == "openneptune":
+        if model == MODEL_CUSTOM:
+            return CustomDisplayCommunicator
+        elif model in MODELS_N4:
+            return OpenNeptune4DisplayCommunicator
+        elif model in MODELS_N3:
+            return OpenNeptune3DisplayCommunicator
+    else:
+        if model == MODEL_CUSTOM:
+            return CustomDisplayCommunicator
+        elif model in MODELS_N4:
+            return ElegooNeptune4DisplayCommunicator
+        elif model in MODELS_N3:
+            return ElegooNeptune3DisplayCommunicator
 
 
 SOCKET_LIMIT = 20 * 1024 * 1024
@@ -121,8 +130,9 @@ class DisplayController:
         self._handle_config()
         self.connected = False
 
+        display_type = self.config.safe_get("general", "display_type")
         printer_model = self.get_printer_model()
-        self.display = get_communicator_for_model(printer_model)(
+        self.display = get_communicator(display_type, printer_model)(
             logger,
             printer_model,
             event_handler=self.display_event_handler,
@@ -826,6 +836,7 @@ class DisplayController:
             },
         )
         data = ret["result"]["status"]
+        logger.info("Display Type: " + str(self.display.get_display_type_name()))
         logger.info("Printer Model: " + str(self.display.get_device_name()))
         await self.display.initialize_display()
         self.handle_status_update(data)
@@ -1322,6 +1333,11 @@ class DisplayController:
                     self._loop.create_task(self.display.show_bed_mesh_final())
                 else:
                     self._go_back()
+
+    async def run_shutdown_sequence(self):
+        self.display.show_shutdown_screens()
+        await asyncio.sleep(1)
+        await self._send_moonraker_request("machine.shutdown")
 
 
 loop = asyncio.get_event_loop()

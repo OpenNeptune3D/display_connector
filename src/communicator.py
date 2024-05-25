@@ -51,6 +51,9 @@ class DisplayCommunicator:
 
     def get_device_name(self):
         return self.model
+    
+    def get_display_type_name(self):
+        return self.__class__.__name__
 
     def get_current_data(self, path):
         index = 0
