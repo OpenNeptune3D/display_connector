@@ -1,3 +1,5 @@
+import asyncio
+
 from src.communicator import DisplayCommunicator
 from src.mapping import (
     Mapper,
@@ -748,15 +750,19 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
         )
         await self.write('xstr 40,400,200,50,1,65535,15319,1,1,1,"SAVE"')
 
-    async def show_shutdown_screens(self):
+    async def show_initial_shutdown_screen(self):
         await self.write("cls 44637")
         await self.write(
             'xstr 8,220,256,20,1,54151,44637,1,1,1,"Please wait while your printer"'
         )
         await self.write('xstr 24,240,224,20,1,54151,44637,1,1,1,"shuts down."')
-        await self.write("delay=10000")
-        await self.write("cls BLACK")
-        await self.write(
+
+    async def show_shutdown_screens(self):
+        await self.show_initial_shutdown_screen()
+        # Need to use this method here, because once we send the delay, the display won't respond anymore
+        self.display.write_command("delay=8000")
+        self.display.write_command("cls BLACK")
+        self.display.write_command(
             'xstr 24,220,224,20,1,54150,0,1,1,1,"It\'s now safe to turn off"'
         )
-        await self.write('xstr 24,240,224,20,1,54150,0,1,1,1,"your printer."')
+        self.display.write_command('xstr 24,240,224,20,1,54150,0,1,1,1,"your printer."')

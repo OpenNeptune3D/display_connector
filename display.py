@@ -657,8 +657,7 @@ class DisplayController:
             self._loop.create_task(self._send_moonraker_request("machine.reboot"))
         elif action == "shutdown_host":
             logger.info("Shutting down Host")
-            self.display.show_shutdown_screens()
-            self._loop.create_task(self._send_moonraker_request("machine.shutdown"))
+            self._loop.create_task(self.run_shutdown_sequence())
         elif action == "reboot_klipper":
             logger.info("Rebooting Klipper")
             self._loop.create_task(
@@ -977,7 +976,7 @@ class DisplayController:
         elif type == EventType.RECONNECTED:
             logger.info("Reconnected to Display")
             self.history = []
-            self.initialize_display()
+            await self.display.initialize_display()
             self._navigate_to_page(PAGE_MAIN, clear_history=True)
         else:
             logger.info(f"Unhandled Event: {type} {data}")
@@ -1335,7 +1334,7 @@ class DisplayController:
                     self._go_back()
 
     async def run_shutdown_sequence(self):
-        self.display.show_shutdown_screens()
+        await self.display.show_shutdown_screens()
         await asyncio.sleep(1)
         await self._send_moonraker_request("machine.shutdown")
 

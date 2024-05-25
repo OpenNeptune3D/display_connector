@@ -33,8 +33,8 @@ class DisplayCommunicator:
     async def connect(self):
         await self.display.connect()
 
-    async def write(self, data):
-        await self.display.command(data, self.timeout)
+    async def write(self, data, timeout=None):
+        await self.display.command(data, timeout if timeout is not None else self.timeout)
 
     async def get_firmware_version(self) -> str:
         pass
