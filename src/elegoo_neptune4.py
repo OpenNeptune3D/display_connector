@@ -24,8 +24,8 @@ class Neptune4Mapper(ElegooDisplayMapper):
 
 class Neptune4ProMapper(Neptune4Mapper):
     def __init__(self) -> None:
-        self.page_mapping[PAGE_PREPARE_TEMP] = "6"
-        self.page_mapping[PAGE_PRINTING_FILAMENT] = "27"
+        self.page_mapping[PAGE_PREPARE_TEMP] = "pretemp"
+        self.page_mapping[PAGE_PRINTING_FILAMENT] = "adjusttemp_pro"
         super().__init__()
         self.data_mapping["extruder"]["target"] = [
             MappingLeaf(
@@ -51,7 +51,7 @@ class Neptune4ProMapper(Neptune4Mapper):
                 formatter=format_temp,
             ),
             MappingLeaf(
-                [build_accessor(self.map_page(PAGE_PREPARE_TEMP), 18)],
+                [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "bedtemp_t")],
                 formatter=lambda x: f"{x:.0f}",
             ),
         ]
@@ -81,7 +81,7 @@ class Neptune4ProMapper(Neptune4Mapper):
                     formatter=format_temp,
                 ),
                 MappingLeaf(
-                    [build_accessor(self.map_page(PAGE_PREPARE_TEMP), 28)],
+                    [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "out_bedtemp_t")],
                     formatter=lambda x: f"{x:.0f}",
                 ),
             ],
@@ -155,7 +155,7 @@ class Neptune4DisplayCommunicator(ElegooDisplayCommunicator):
         elif self.model == MODEL_N4_PRO:
             model_image_key = "214"
             await self.write(
-                f"p[{self.mapper.map_page(PAGE_MAIN)}].disp_q5.val=1"
+                f"{self.mapper.map_page(PAGE_MAIN)}.disp_q5.val=1"
             )  # N4Pro Outer Bed Symbol (Bottom Rig>
         elif self.model == MODEL_N4_PLUS:
             model_image_key = "313"
@@ -164,13 +164,13 @@ class Neptune4DisplayCommunicator(ElegooDisplayCommunicator):
 
         if self.display_name_override is None:
             await self.write(
-                f"p[{self.mapper.map_page(PAGE_MAIN)}].q4.picc={model_image_key}"
+                f"{self.mapper.map_page(PAGE_MAIN)}.q4.picc={model_image_key}"
             )
         else:
-            await self.write(f"p[{self.mapper.map_page(PAGE_MAIN)}].q4.picc=137")
+            await self.write(f"{self.mapper.map_page(PAGE_MAIN)}.q4.picc=137")
 
         await self.write(
-            f'p[{self.mapper.map_page(PAGE_SETTINGS_ABOUT)}].b[8].txt="{self.get_device_name()}"'
+            f'{self.mapper.map_page(PAGE_SETTINGS_ABOUT)}.machine.txt="{self.get_device_name()}"'
         )
 
     def get_model(self) -> str:

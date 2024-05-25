@@ -51,37 +51,37 @@ from src.wifi import get_wlan0_status
 
 class ElegooDisplayMapper(Mapper):
     page_mapping = {
-        PAGE_MAIN: "1",
-        PAGE_FILES: "2",
-        PAGE_SHUTDOWN_DIALOG: "50",
-        PAGE_PREPARE_MOVE: "8",
-        PAGE_PREPARE_TEMP: "95",
-        PAGE_PREPARE_EXTRUDER: "9",
-        PAGE_SETTINGS: "11",
-        PAGE_SETTINGS_LANGUAGE: "12",
-        PAGE_SETTINGS_TEMPERATURE: "32",
-        PAGE_SETTINGS_TEMPERATURE_SET: "33",
-        PAGE_SETTINGS_ABOUT: "35",
-        PAGE_SETTINGS_ADVANCED: "42",
-        PAGE_LEVELING: "3",
-        PAGE_LEVELING_SCREW_ADJUST: "94",
-        PAGE_LEVELING_Z_OFFSET_ADJUST: "137",
-        PAGE_CONFIRM_PRINT: "18",
-        PAGE_PRINTING: "19",
-        PAGE_PRINTING_KAMP: "104",
-        PAGE_PRINTING_PAUSE: "25",
-        PAGE_PRINTING_STOP: "26",
-        PAGE_PRINTING_EMERGENCY_STOP: "106",
-        PAGE_PRINTING_COMPLETE: "24",
-        PAGE_PRINTING_FILAMENT: "28",
-        PAGE_PRINTING_SPEED: "135",
-        PAGE_PRINTING_ADJUST: "127",
-        PAGE_PRINTING_FILAMENT_RUNOUT: "22",
-        PAGE_PRINTING_DIALOG_SPEED: "86",
-        PAGE_PRINTING_DIALOG_FAN: "87",
-        PAGE_PRINTING_DIALOG_FLOW: "85",
-        PAGE_OVERLAY_LOADING: "130",
-        PAGE_LIGHTS: "84",
+        PAGE_MAIN: "main",
+        PAGE_FILES: "file1",
+        PAGE_SHUTDOWN_DIALOG: "none_9",
+        PAGE_PREPARE_MOVE: "premove",
+        PAGE_PREPARE_TEMP: "pretemp",
+        PAGE_PREPARE_EXTRUDER: "prefilament",
+        PAGE_SETTINGS: "set",
+        PAGE_SETTINGS_LANGUAGE: "language",
+        PAGE_SETTINGS_TEMPERATURE: "tempset",
+        PAGE_SETTINGS_TEMPERATURE_SET: "tempsetvalue",
+        PAGE_SETTINGS_ABOUT: "information",
+        PAGE_SETTINGS_ADVANCED: "multiset",
+        PAGE_LEVELING: "file2",
+        PAGE_LEVELING_SCREW_ADJUST: "assist_level",
+        PAGE_LEVELING_Z_OFFSET_ADJUST: "leveldata_36",
+        PAGE_CONFIRM_PRINT: "askprint",
+        PAGE_PRINTING: "printpause",
+        PAGE_PRINTING_KAMP: "leveling_121",
+        PAGE_PRINTING_PAUSE: "pauseconfirm",
+        PAGE_PRINTING_STOP: "resumeconfirm",
+        PAGE_PRINTING_EMERGENCY_STOP: "if_emergency",
+        PAGE_PRINTING_COMPLETE: "printfinish",
+        PAGE_PRINTING_FILAMENT: "adjusttemp",
+        PAGE_PRINTING_SPEED: "adjustspeed_3",
+        PAGE_PRINTING_ADJUST: "adjustzoffset3",
+        PAGE_PRINTING_FILAMENT_RUNOUT: "nofilament",
+        PAGE_PRINTING_DIALOG_SPEED: "print_speed",
+        PAGE_PRINTING_DIALOG_FAN: "fan_speed",
+        PAGE_PRINTING_DIALOG_FLOW: "flow_speed",
+        PAGE_OVERLAY_LOADING: "wifi_scanning",
+        PAGE_LIGHTS: "led",
     }
 
     def __init__(self) -> None:
@@ -99,7 +99,7 @@ class ElegooDisplayMapper(Mapper):
                                 self.map_page(PAGE_PREPARE_EXTRUDER), "nozzletemp"
                             ),
                             build_accessor(self.map_page(PAGE_PRINTING), "nozzletemp"),
-                            build_accessor(self.map_page(PAGE_PRINTING_KAMP), "b[3]"),
+                            build_accessor(self.map_page(PAGE_PRINTING_KAMP), "nozzletemp"),
                             build_accessor(
                                 self.map_page(PAGE_PRINTING_FILAMENT), "nozzletemp"
                             ),
@@ -109,7 +109,7 @@ class ElegooDisplayMapper(Mapper):
                 ],
                 "target": [
                     MappingLeaf(
-                        [build_accessor(self.map_page(PAGE_PREPARE_TEMP), 17)],
+                        [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "nozzletemp_t")],
                         formatter=lambda x: f"{x:.0f}",
                     )
                 ],
@@ -124,7 +124,7 @@ class ElegooDisplayMapper(Mapper):
                                 self.map_page(PAGE_PREPARE_EXTRUDER), "bedtemp"
                             ),
                             build_accessor(self.map_page(PAGE_PRINTING), "bedtemp"),
-                            build_accessor(self.map_page(PAGE_PRINTING_KAMP), "b[2]"),
+                            build_accessor(self.map_page(PAGE_PRINTING_KAMP), "bedtemp"),
                             build_accessor(
                                 self.map_page(PAGE_PRINTING_FILAMENT), "bedtemp"
                             ),
@@ -134,7 +134,7 @@ class ElegooDisplayMapper(Mapper):
                 ],
                 "target": [
                     MappingLeaf(
-                        [build_accessor(self.map_page(PAGE_PREPARE_TEMP), 18)],
+                        [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "bedtemp_t")],
                         formatter=lambda x: f"{x:.0f}",
                     )
                 ],
@@ -174,8 +174,8 @@ class ElegooDisplayMapper(Mapper):
                 "print_duration": [
                     MappingLeaf(
                         [
-                            build_accessor(self.map_page(PAGE_PRINTING), "6"),
-                            build_accessor(self.map_page(PAGE_PRINTING_COMPLETE), "4"),
+                            build_accessor(self.map_page(PAGE_PRINTING), "printtime"),
+                            build_accessor(self.map_page(PAGE_PRINTING_COMPLETE), "t0"),
                         ],
                         formatter=format_time,
                     )
@@ -184,7 +184,7 @@ class ElegooDisplayMapper(Mapper):
                     MappingLeaf(
                         [
                             build_accessor(self.map_page(PAGE_PRINTING), "t0"),
-                            build_accessor(self.map_page(PAGE_PRINTING_COMPLETE), "3"),
+                            build_accessor(self.map_page(PAGE_PRINTING_COMPLETE), "t1"),
                         ],
                         formatter=build_format_filename("printing"),
                     )
@@ -199,10 +199,10 @@ class ElegooDisplayMapper(Mapper):
                     MappingLeaf(
                         [
                             build_accessor(
-                                self.map_page(PAGE_PRINTING_DIALOG_FLOW), "b[3]"
+                                self.map_page(PAGE_PRINTING_DIALOG_FLOW), "h0"
                             ),
                             build_accessor(
-                                self.map_page(PAGE_PRINTING_DIALOG_FLOW), "b[6]"
+                                self.map_page(PAGE_PRINTING_DIALOG_FLOW), "n0"
                             ),
                         ],
                         field_type="val",
@@ -217,10 +217,10 @@ class ElegooDisplayMapper(Mapper):
                     MappingLeaf(
                         [
                             build_accessor(
-                                self.map_page(PAGE_PRINTING_DIALOG_SPEED), "b[3]"
+                                self.map_page(PAGE_PRINTING_DIALOG_SPEED), "h0"
                             ),
                             build_accessor(
-                                self.map_page(PAGE_PRINTING_DIALOG_SPEED), "b[6]"
+                                self.map_page(PAGE_PRINTING_DIALOG_SPEED), "n0"
                             ),
                         ],
                         field_type="val",
@@ -230,7 +230,7 @@ class ElegooDisplayMapper(Mapper):
                 "homing_origin": {
                     2: [
                         MappingLeaf(
-                            [build_accessor(self.map_page(PAGE_PRINTING_ADJUST), "15")],
+                            [build_accessor(self.map_page(PAGE_PRINTING_ADJUST), "z_offset")],
                             formatter=lambda x: f"{x:.3f}",
                         )
                     ],
@@ -243,7 +243,7 @@ class ElegooDisplayMapper(Mapper):
                         formatter=format_percent,
                     ),
                     MappingLeaf(
-                        [build_accessor(self.map_page(PAGE_SETTINGS), "12")],
+                        [build_accessor(self.map_page(PAGE_SETTINGS), "fanstatue")],
                         field_type="pic",
                         formatter=lambda x: "77" if int(x) == 1 else "76",
                     ),
@@ -312,8 +312,8 @@ class ElegooDisplayMapper(Mapper):
             "enabled": [
                 MappingLeaf(
                     [
-                        build_accessor(self.map_page(PAGE_SETTINGS), "11"),
-                        build_accessor(self.map_page(PAGE_PRINTING_ADJUST), "16"),
+                        build_accessor(self.map_page(PAGE_SETTINGS), "filamentdec"),
+                        build_accessor(self.map_page(PAGE_PRINTING_ADJUST), "filamentdec"),
                     ],
                     field_type="pic",
                     formatter=lambda x: "77" if int(x) == 1 else "76",
@@ -323,12 +323,12 @@ class ElegooDisplayMapper(Mapper):
 
 
 class ElegooDisplayCommunicator(DisplayCommunicator):
-    supported_firmware_versions = ["1.2.11", "1.2.12"]
+    supported_firmware_versions = ["1.2.11", "1.2.12", "1.2.13"]
 
     bed_leveling_box_size = 20
 
     async def get_firmware_version(self) -> str:
-        return await self.display.get("p[35].b[11].txt", self.timeout)
+        return await self.display.get("information.lversion.txt", self.timeout)
 
     async def check_valid_version(self):
         is_valid = await super().check_valid_version()
@@ -359,9 +359,8 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
             await self.write(f"xpic {200 if has_wifi else 230},16,30,30,220,200,51")
         elif current_page == PAGE_SETTINGS_ABOUT:
             await self.write(
-                "p["
-                + self.mapper.map_page(PAGE_SETTINGS_ABOUT)
-                + '].b[16].txt="'
+                self.mapper.map_page(PAGE_SETTINGS_ABOUT)
+                + '.b[16].txt="'
                 + self.ips
                 + '"'
             )
@@ -377,8 +376,8 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
                 + ',1,1,1,"github.com/OpenNeptune3D"'
             )
         elif current_page == PAGE_LIGHTS:
-            await self.write("b[3].txt=\"Part Light\"")
-            await self.write("b[4].txt=\"Frame Light\"")
+            await self.write("t0.txt=\"Part Light\"")
+            await self.write("t1.txt=\"Frame Light\"")
         elif current_page == PAGE_PRINTING:
             await self.write("printvalue.xcen=0")
             await self.write("move printvalue,13,267,13,267,0,10")
@@ -386,7 +385,7 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
         elif current_page == PAGE_PRINTING_COMPLETE:
             await self.write('b[4].txt="Print Completed!"')
         elif current_page == PAGE_PRINTING_ADJUST:
-            await self.write('b[20].txt="' + self.ips + '"')
+            await self.write('t9.txt="' + self.ips + '"')
         elif current_page == PAGE_LEVELING:
             await self.write('b[12].txt="Leveling"')
             await self.write('b[18].txt="Screws Tilt Adjust"')
@@ -409,28 +408,28 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
     ):
         if self.has_two_beds:
             await self.write(
-                f"p[{self.mapper.map_page(PAGE_PRINTING_FILAMENT)}].b0.picc="
+                f"{self.mapper.map_page(PAGE_PRINTING_FILAMENT)}.b0.picc="
                 + str(90 if printing_selected_heater == "extruder" else 89)
             )
             await self.write(
-                f"p[{self.mapper.map_page(PAGE_PRINTING_FILAMENT)}].b1.picc="
+                f"{self.mapper.map_page(PAGE_PRINTING_FILAMENT)}.b1.picc="
                 + str(90 if printing_selected_heater == "heater_bed" else 89)
             )
             await self.write(
-                f"p[{self.mapper.map_page(PAGE_PRINTING_FILAMENT)}].b2.picc="
+                f"{self.mapper.map_page(PAGE_PRINTING_FILAMENT)}.b2.picc="
                 + str(90 if printing_selected_heater == "heater_bed_outer" else 89)
             )
             await self.write(
-                f"p[{self.mapper.map_page(PAGE_PRINTING_FILAMENT)}].targettemp.txt=\""
+                f"{self.mapper.map_page(PAGE_PRINTING_FILAMENT)}.targettemp.txt=\""
                 + f"{printing_target_temp:.0f}\""
             )
 
         else:
             await self.write(
-                f'p[{self.mapper.map_page(PAGE_PRINTING_FILAMENT)}].b[13].pic={54 + ["extruder", "heater_bed"].index(printing_selected_heater)}'
+                f'{self.mapper.map_page(PAGE_PRINTING_FILAMENT)}.b[13].pic={54 + ["extruder", "heater_bed"].index(printing_selected_heater)}'
             )
             await self.write(
-                f'p[{self.mapper.map_page(PAGE_PRINTING_FILAMENT)}].b[35].txt="'
+                f'{self.mapper.map_page(PAGE_PRINTING_FILAMENT)}.b[35].txt="'
                 + f"{printing_target_temp:.0f}"
                 + '"'
             )
@@ -439,55 +438,55 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
         self, printing_selected_temp_increment
     ):
         await self.write(
-            f'p[{self.mapper.map_page(PAGE_PRINTING_FILAMENT)}].p1.pic={56 + ["1", "5", "10"].index(printing_selected_temp_increment)}'
+            f'{self.mapper.map_page(PAGE_PRINTING_FILAMENT)}.p1.pic={56 + ["1", "5", "10"].index(printing_selected_temp_increment)}'
         )
 
     async def update_printing_speed_settings_ui(
         self, printing_selected_speed_type, printing_target_speed
     ):
         await self.write(
-            f"p[{self.mapper.map_page(PAGE_PRINTING_SPEED)}].b0.picc="
+            f"{self.mapper.map_page(PAGE_PRINTING_SPEED)}.b0.picc="
             + str(59 if printing_selected_speed_type == "print" else 58)
         )
         await self.write(
-            f"p[{self.mapper.map_page(PAGE_PRINTING_SPEED)}].b1.picc="
+            f"{self.mapper.map_page(PAGE_PRINTING_SPEED)}.b1.picc="
             + str(59 if printing_selected_speed_type == "flow" else 58)
         )
         await self.write(
-            f"p[{self.mapper.map_page(PAGE_PRINTING_SPEED)}].b2.picc="
+            f"{self.mapper.map_page(PAGE_PRINTING_SPEED)}.b2.picc="
             + str(59 if printing_selected_speed_type == "fan" else 58)
         )
         await self.write(
-            f"p[{self.mapper.map_page(PAGE_PRINTING_SPEED)}].targetspeed.val={printing_target_speed*100:.0f}"
+            f"{self.mapper.map_page(PAGE_PRINTING_SPEED)}.targetspeed.val={printing_target_speed*100:.0f}"
         )
 
     async def update_printing_speed_increment_ui(
         self, printing_selected_speed_increment
     ):
         await self.write(
-            f"p[{self.mapper.map_page(PAGE_PRINTING_SPEED)}].b[14].picc="
+            f"{self.mapper.map_page(PAGE_PRINTING_SPEED)}.b[14].picc="
             + str(59 if printing_selected_speed_increment == "1" else 58)
         )
         await self.write(
-            f"p[{self.mapper.map_page(PAGE_PRINTING_SPEED)}].b[15].picc="
+            f"{self.mapper.map_page(PAGE_PRINTING_SPEED)}.b[15].picc="
             + str(59 if printing_selected_speed_increment == "5" else 58)
         )
         await self.write(
-            f"p[{self.mapper.map_page(PAGE_PRINTING_SPEED)}].b[16].picc="
+            f"{self.mapper.map_page(PAGE_PRINTING_SPEED)}.b[16].picc="
             + str(59 if printing_selected_speed_increment == "10" else 58)
         )
 
     async def update_printing_zoffset_increment_ui(self, z_offset_distance):
         await self.write(
-            f"p[{self.mapper.map_page(PAGE_PRINTING_ADJUST)}].b[23].picc="
+            f"{self.mapper.map_page(PAGE_PRINTING_ADJUST)}.b[23].picc="
             + str(36 if z_offset_distance == "0.01" else 65)
         )
         await self.write(
-            f"p[{self.mapper.map_page(PAGE_PRINTING_ADJUST)}].b[24].picc="
+            f"{self.mapper.map_page(PAGE_PRINTING_ADJUST)}.b[24].picc="
             + str(36 if z_offset_distance == "0.1" else 65)
         )
         await self.write(
-            f"p[{self.mapper.map_page(PAGE_PRINTING_ADJUST)}].b[25].picc="
+            f"{self.mapper.map_page(PAGE_PRINTING_ADJUST)}.b[25].picc="
             + str(36 if z_offset_distance == "1" else 65)
         )
 
@@ -498,26 +497,26 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
         temperature_preset_bed,
     ):
         await self.write(
-            f"p[{self.mapper.map_page(PAGE_SETTINGS_TEMPERATURE_SET)}].b[7].pic={56 + [1, 5, 10].index(temperature_preset_step)}"
+            f"{self.mapper.map_page(PAGE_SETTINGS_TEMPERATURE_SET)}.b[7].pic={56 + [1, 5, 10].index(temperature_preset_step)}"
         )
         await self.write(
-            f'p[{self.mapper.map_page(PAGE_SETTINGS_TEMPERATURE_SET)}].b[18].txt="{temperature_preset_extruder}"'
+            f'{self.mapper.map_page(PAGE_SETTINGS_TEMPERATURE_SET)}.b[18].txt="{temperature_preset_extruder}"'
         )
         await self.write(
-            f'p[{self.mapper.map_page(PAGE_SETTINGS_TEMPERATURE_SET)}].b[19].txt="{temperature_preset_bed}"'
+            f'{self.mapper.map_page(PAGE_SETTINGS_TEMPERATURE_SET)}.b[19].txt="{temperature_preset_bed}"'
         )
 
     async def update_prepare_move_ui(self, move_distance):
         await self.write(
-            f'p[{self.mapper.map_page(PAGE_PREPARE_MOVE)}].p0.pic={10 + ["0.1", "1", "10"].index(move_distance)}'
+            f'{self.mapper.map_page(PAGE_PREPARE_MOVE)}.p0.pic={10 + ["0.1", "1", "10"].index(move_distance)}'
         )
 
     async def update_prepare_extrude_ui(self, extrude_amount, extrude_speed):
         await self.write(
-            f'p[{self.mapper.map_page(PAGE_PREPARE_EXTRUDER)}].b[8].txt="{extrude_amount}"'
+            f'{self.mapper.map_page(PAGE_PREPARE_EXTRUDER)}.b[8].txt="{extrude_amount}"'
         )
         await self.write(
-            f'p[{self.mapper.map_page(PAGE_PREPARE_EXTRUDER)}].b[9].txt="{extrude_speed}"'
+            f'{self.mapper.map_page(PAGE_PREPARE_EXTRUDER)}.b[9].txt="{extrude_speed}"'
         )
 
     async def update_wifi_ui(self):
@@ -539,11 +538,11 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
         file_count = len(dir_contents)
         if file_count == 0:
             await self.write(
-                f'p[{self.mapper.map_page(PAGE_FILES)}].b[11].txt="{title} (Empty)"'
+                f'{self.mapper.map_page(PAGE_FILES)}.b[11].txt="{title} (Empty)"'
             )
         else:
             await self.write(
-                f'p[{self.mapper.map_page(PAGE_FILES)}].b[11].txt="{title} ({(files_page * page_size) + 1}-{min((files_page * page_size) + page_size, file_count)}/{file_count})"'
+                f'{self.mapper.map_page(PAGE_FILES)}.b[11].txt="{title} ({(files_page * page_size) + 1}-{min((files_page * page_size) + page_size, file_count)}/{file_count})"'
             )
         component_index = 0
         for index in range(
@@ -551,35 +550,35 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
         ):
             file = dir_contents[index]
             await self.write(
-                f'p[{self.mapper.map_page(PAGE_FILES)}].b[{component_index + 18}].txt="{file["name"]}"'
+                f'{self.mapper.map_page(PAGE_FILES)}.b[{component_index + 18}.txt="{file["name"]}"'
             )
             if file["type"] == "dir":
                 await self.write(
-                    f"p[{self.mapper.map_page(PAGE_FILES)}].b[{component_index + 13}].pic=194"
+                    f"{self.mapper.map_page(PAGE_FILES)}.b[{component_index + 13}.pic=194"
                 )
             else:
                 await self.write(
-                    f"p[{self.mapper.map_page(PAGE_FILES)}].b[{component_index + 13}].pic=193"
+                    f"{self.mapper.map_page(PAGE_FILES)}.b[{component_index + 13}.pic=193"
                 )
             component_index += 1
         for index in range(component_index, page_size):
             await self.write(
-                f"p[{self.mapper.map_page(PAGE_FILES)}].b[{index + 13}].pic=195"
+                f"{self.mapper.map_page(PAGE_FILES)}.b[{index + 13}.pic=195"
             )
             await self.write(
-                f'p[{self.mapper.map_page(PAGE_FILES)}].b[{index + 18}].txt=""'
+                f'{self.mapper.map_page(PAGE_FILES)}.b[{index + 18}.txt=""'
             )
 
     async def update_printing_state_ui(self, state):
         if state == "printing":
-            await self.write(f"p[{self.mapper.map_page(PAGE_PRINTING)}].b[44].pic=68")
+            await self.write(f"{self.mapper.map_page(PAGE_PRINTING)}.b[44].pic=68")
         elif state == "paused":
-            await self.write(f"p[{self.mapper.map_page(PAGE_PRINTING)}].b[44].pic=69")
+            await self.write(f"{self.mapper.map_page(PAGE_PRINTING)}.b[44].pic=69")
 
     async def set_data_prepare_screen(self, filename, metadata):
-        await self.write(f"p[{self.mapper.map_page(PAGE_CONFIRM_PRINT)}].b[3].font=2")
+        await self.write(f"{self.mapper.map_page(PAGE_CONFIRM_PRINT)}.b[3].font=2")
         await self.write(
-            f'p[{self.mapper.map_page(PAGE_CONFIRM_PRINT)}].b[2].txt="{build_format_filename()(filename)}"'
+            f'{self.mapper.map_page(PAGE_CONFIRM_PRINT)}.b[2].txt="{build_format_filename()(filename)}"'
         )
         info = []
         if "layer_height" in metadata:
@@ -587,7 +586,7 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
         if "estimated_time" in metadata:
             info.append(f"Time: {format_time(metadata['estimated_time'])}")
         await self.write(
-            f'p[{self.mapper.map_page(PAGE_CONFIRM_PRINT)}].b[3].txt="{" ".join(info)}"'
+            f'{self.mapper.map_page(PAGE_CONFIRM_PRINT)}.b[3].txt="{" ".join(info)}"'
         )
 
     async def draw_initial_screw_leveling(self):
@@ -653,17 +652,17 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
         await self.write(f'b[3].txt="${text}"')
 
     async def draw_initial_zprobe_leveling(self, z_probe_step, z_probe_distance):
-        await self.write('p[137].b[19].txt="Z-Probe"')
+        await self.write(f'{self.mapper.map_page(PAGE_LEVELING_Z_OFFSET_ADJUST)}.b[19].txt="Z-Probe"')
         await self.write("fill 0,250,320,320,10665")
         await self.write("fill 0,50,320,80,10665")
         await self.update_zprobe_leveling_ui(z_probe_step, z_probe_distance)
 
     async def update_zprobe_leveling_ui(self, z_probe_step, z_probe_distance):
-        await self.write('p[137].b[19].txt="Z-Probe"')
+        await self.write(f'{self.mapper.map_page(PAGE_LEVELING_Z_OFFSET_ADJUST)}.b[19].txt="Z-Probe"')
         await self.write(
-            f'p[137].b[11].pic={7 + ["0.01", "0.1", "1"].index(z_probe_step)}'
+            f'{self.mapper.map_page(PAGE_LEVELING_Z_OFFSET_ADJUST)}.b[11].pic={7 + ["0.01", "0.1", "1"].index(z_probe_step)}'
         )
-        await self.write(f'p[137].b[20].txt="{z_probe_distance}"')
+        await self.write(f'{self.mapper.map_page(PAGE_LEVELING_Z_OFFSET_ADJUST)}.b[20].txt="{z_probe_distance}"')
 
     async def draw_kamp_page(self, bed_leveling_counts):
         await self.write("fill 0,45,272,340,10665")
@@ -705,21 +704,20 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
 
     async def update_klipper_version_ui(self, software_version):
         await self.write(
-            "p["
-            + self.mapper.map_page(PAGE_SETTINGS_ABOUT)
-            + '].b[10].txt="'
+            self.mapper.map_page(PAGE_SETTINGS_ABOUT)
+            + '.b[10].txt="'
             + software_version
             + '"'
         )
 
     async def update_machine_size_ui(self, max_x, max_y, max_z):
         await self.write(
-            f'p[{self.mapper.map_page(PAGE_SETTINGS_ABOUT)}].b[9].txt="{max_x}x{max_y}x{max_z}"'
+            f'{self.mapper.map_page(PAGE_SETTINGS_ABOUT)}.b[9].txt="{max_x}x{max_y}x{max_z}"'
         )
 
     async def display_thumbnail(self, page_number, thumbnail):
         await self.write("vis cp0,1")
-        await self.write("p[" + str(page_number) + "].cp0.close()")
+        await self.write(str(page_number) + ".cp0.close()")
 
         parts = []
         start = 0
@@ -732,7 +730,7 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
         parts.append(thumbnail[start : len(thumbnail)])
         for part in parts:
             await self.write(
-                "p[" + str(page_number) + '].cp0.write("' + str(part) + '")'
+                str(page_number) + '.cp0.write("' + str(part) + '")'
             )
 
     async def hide_thumbnail(self):
@@ -740,7 +738,7 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
 
     async def update_time_remaining(self, time_remaining):
         await self.write(
-            f'p[{self.mapper.map_page(PAGE_PRINTING)}].b[37].txt="{time_remaining}"'
+            f'{self.mapper.map_page(PAGE_PRINTING)}.b[37].txt="{time_remaining}"'
         )
 
     async def show_bed_mesh_final(self):

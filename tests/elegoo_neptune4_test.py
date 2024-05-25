@@ -45,7 +45,7 @@ async def test_initializing():
     assert communicator.mapper is not None
     communicator.display.command.assert_has_calls([
         call("sendxy=1", 5),
-        call("p[1].q4.picc=213", 5)
+        call("main.q4.picc=213", 5)
         ])
     
 
@@ -57,8 +57,8 @@ async def test_initializing_pro():
     assert communicator.mapper is not None
     communicator.display.command.assert_has_calls([
         call("sendxy=1", 5),
-        call('p[1].disp_q5.val=1', 5),
-        call("p[1].q4.picc=214", 5)
+        call('main.disp_q5.val=1', 5),
+        call("main.q4.picc=214", 5)
         ])
     
 
@@ -70,7 +70,7 @@ async def test_initializing_plus():
     assert communicator.mapper is not None
     communicator.display.command.assert_has_calls([
         call("sendxy=1", 5),
-        call("p[1].q4.picc=313", 5)
+        call("main.q4.picc=313", 5)
         ])
     
 
@@ -82,5 +82,5 @@ async def test_initializing_max():
     assert communicator.mapper is not None
     communicator.display.command.assert_has_calls([
         call("sendxy=1", 5),
-        call("p[1].q4.picc=314", 5)
+        call("main.q4.picc=314", 5)
         ])
