@@ -1,4 +1,3 @@
-import asyncio
 
 from src.communicator import DisplayCommunicator
 from src.mapping import (

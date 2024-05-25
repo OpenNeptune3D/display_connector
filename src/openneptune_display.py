@@ -42,11 +42,7 @@ from src.mapping import (
 from src.colors import (
     BACKGROUND_DIALOG,
     BACKGROUND_GRAY,
-    TEXT_ERROR,
-    TEXT_SUCCESS,
-    TEXT_WARNING,
 )
-from src.wifi import get_wlan0_status
 
 
 class OpenNeptuneDisplayMapper(Mapper):
