@@ -1102,7 +1102,7 @@ class DisplayController:
                 self.current_filename = filename
                 if filename is not None and filename != "":
                     self._loop.create_task(
-                        self.load_thumbnail_for_page(self.current_filename, "19")
+                        self.load_thumbnail_for_page(self.current_filename, self._page_id(PAGE_PRINTING))
                     )
             if "state" in new_data["print_stats"]:
                 state = new_data["print_stats"]["state"]
