@@ -6,6 +6,9 @@ class DisplayCommunicator:
     supported_firmware_versions = []
     current_data = {}
 
+    blocked_by = None
+    blocked_buffer = []
+
     ips = "--"
 
     def __init__(
@@ -33,8 +36,25 @@ class DisplayCommunicator:
     async def connect(self):
         await self.display.connect()
 
-    async def write(self, data, timeout=None):
+    async def write(self, data, timeout=None, blocked_key=None):
+        if self.blocked_by is not None:
+            if self.blocked_by != blocked_key:
+                self.blocked_buffer.append(data)
+                return
+        
+        if blocked_key is not None and self.blocked_by is None:
+            self.blocked_by = blocked_key
+            self.logger.debug(f"Display communication blocked by {blocked_key}")
+
         await self.display.command(data, timeout if timeout is not None else self.timeout)
+
+    async def unblock(self, blocked_key):
+        if self.blocked_by == blocked_key:
+            while len(self.blocked_buffer) > 0:
+                data = self.blocked_buffer.pop(0)
+                await self.write(data, blocked_key=blocked_key)
+            self.blocked_by = None
+            self.logger.debug(f"Display communication unblocked by {blocked_key}")
 
     async def get_firmware_version(self) -> str:
         pass
