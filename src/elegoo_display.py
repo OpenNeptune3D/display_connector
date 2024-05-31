@@ -734,7 +734,7 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
                 str(page_number) + '.cp0.write("' + str(part) + '")',
                 blocked_key=f"thumbnail_{page_number}"
             )
-        self.logger.debug(f"Thumbnail sent to display")
+        self.logger.debug("Thumbnail sent to display")
         await self.unblock(f"thumbnail_{page_number}")
 
     async def hide_thumbnail(self):
