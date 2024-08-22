@@ -3,7 +3,6 @@
 # The ElegooNeptuneThumbnails plugin is released under the terms of the AGPLv3 or higher.
 
 import numpy as np
-from PIL import Image, ImageColor
 
 def parse_thumbnail(img, width, height, default_background) -> str:
     img.thumbnail((width, height))
