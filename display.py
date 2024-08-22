@@ -16,6 +16,7 @@ from src.config import TEMP_DEFAULTS, ConfigHandler
 from watchdog.observers import Observer
 from watchdog.events import PatternMatchingEventHandler
 from math import ceil
+from concurrent.futures import ThreadPoolExecutor 
 
 from src.tjc import EventType
 from src.response_actions import response_actions, input_actions, custom_touch_actions
@@ -1063,8 +1064,10 @@ class DisplayController:
 
     async def load_thumbnail_for_page(self, filename, page_number, metadata=None):
         logger.info("Loading thumbnail for " + filename)
+        
         if metadata is None:
             metadata = await self.load_metadata(filename)
+        
         best_thumbnail = None
         for thumbnail in metadata["thumbnails"]:
             if thumbnail["width"] == 160:
@@ -1072,7 +1075,9 @@ class DisplayController:
                 break
             if best_thumbnail is None or thumbnail["width"] > best_thumbnail["width"]:
                 best_thumbnail = thumbnail
+        
         if best_thumbnail is None:
+            logger.warning(f"No suitable thumbnail found for {filename}")
             if self._get_current_page() == page_number:
                 await self.display.hide_thumbnail()
             return
@@ -1082,16 +1087,44 @@ class DisplayController:
             path = path + "/"
         path += best_thumbnail["relative_path"]
 
-        img = requests.get(
-            f"{self.config.safe_get('general', 'moonraker_url', 'http://localhost:7125')}/server/files/gcodes/{pathname2url(path)}", timeout=5
-        )
-        thumbnail = Image.open(io.BytesIO(img.content))
+        try:
+            logger.info(f"Fetching thumbnail image from {path}")
+            img = requests.get(
+                f"{self.config.safe_get('general', 'moonraker_url', 'http://localhost:7125')}/server/files/gcodes/{pathname2url(path)}", timeout=5
+            )
+            logger.info("Thumbnail image fetched successfully")
+            thumbnail = Image.open(io.BytesIO(img.content))
+            logger.info("Thumbnail image opened successfully")
+        except requests.RequestException as e:
+            logger.error(f"Failed to fetch thumbnail: {e}")
+            await self.display.hide_thumbnail()
+            return
+        except IOError as e:
+            logger.error(f"Failed to open thumbnail image: {e}")
+            await self.display.hide_thumbnail()
+            return
+
+        # Determine background color
         background = "29354a"
         if "thumbnails" in self.config:
             if "background_color" in self.config["thumbnails"]:
                 background = self.config["thumbnails"]["background_color"]
-        image = parse_thumbnail(thumbnail, 160, 160, background)
+        
+        try:
+            logger.info("Starting thumbnail parsing")
+            loop = asyncio.get_running_loop()
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                image = await loop.run_in_executor(pool, parse_thumbnail, thumbnail, 160, 160, background)
+            logger.info("Thumbnail parsing completed")
+        except Exception as e:
+            logger.error(f"Error in thumbnail parsing: {e}")
+            await self.display.hide_thumbnail()
+            return
+        
+        # Display the parsed thumbnail
+        logger.info("Displaying the thumbnail")
         await self.display.display_thumbnail(page_number, image)
+        logger.info("Thumbnail displayed successfully")
 
     def handle_status_update(self, new_data, data_mapping=None):
         if data_mapping is None:
