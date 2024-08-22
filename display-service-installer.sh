@@ -51,7 +51,6 @@ ExecStartPre=/bin/sleep 10
 ExecStart=/home/mks/display_connector/venv/bin/python /home/mks/display_connector/display.py
 WorkingDirectory=/home/mks/display_connector
 Restart=on-failure
-CPUQuota=50%
 RestartSec=10
 User=mks
 ProtectSystem=full
