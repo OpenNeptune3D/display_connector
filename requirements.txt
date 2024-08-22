@@ -4,3 +4,4 @@ nextion
 pyserial_asyncio
 pillow
 watchdog
+numpy
