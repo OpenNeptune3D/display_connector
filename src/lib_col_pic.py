@@ -1,194 +1,125 @@
 # Copyright (c) 2023 Molodos
+
 # The ElegooNeptuneThumbnails plugin is released under the terms of the AGPLv3 or higher.
 
-
-from array import array
-from PIL import ImageColor
-
+import numpy as np
+from PIL import Image, ImageColor
 
 def parse_thumbnail(img, width, height, default_background) -> str:
     img.thumbnail((width, height))
-    pixels = img.load()
-    result = ""
-    img_size = img.size
-    color16 = array("H")
-    default_background = ImageColor.getcolor(
-        default_background
-        if default_background.startswith("#")
-        else "#" + default_background,
-        "RGB",
+    img = img.convert("RGBA")
+    pixels = np.array(img)
+    img_size = pixels.shape[:2]
+
+    # Ensure the background color is in the correct format
+    r_bkg, g_bkg, b_bkg = ImageColor.getcolor(
+        default_background if default_background.startswith("#") else "#" + default_background,
+        "RGB"
     )
-    try:
-        for i in range(img.size[0]):  # for every pixel:
-            for j in range(img.size[1]):
-                pixel_color = pixels[j, i]
-                if pixel_color[3] < 255:
-                    alpha = pixel_color[3] / 255
-                    pixel_color = (
-                        int(
-                            pixel_color[0] * alpha + (1 - alpha) * default_background[0]
-                        ),
-                        int(
-                            pixel_color[1] * alpha + (1 - alpha) * default_background[1]
-                        ),
-                        int(
-                            pixel_color[2] * alpha + (1 - alpha) * default_background[2]
-                        ),
-                    )
-                r = pixel_color[0] >> 3
-                g = pixel_color[1] >> 2
-                b = pixel_color[2] >> 3
-                rgb = (r << 11) | (g << 5) | b
-                color16.append(rgb)
-        output_data = bytearray(img_size[0] * img_size[1] * 10)
-        ColPic_EncodeStr(
-            color16,
-            img_size[0],
-            img_size[1],
-            output_data,
-            img_size[0] * img_size[1] * 10,
-            1024,
-        )
 
-        j = 0
-        for i in range(len(output_data)):
-            if output_data[i] != 0:
-                result += chr(output_data[i])
-                j += 1
+    # Alpha blending optimization
+    alpha = pixels[:, :, 3] / 255.0
+    non_opaque_mask = alpha != 1.0
+    pixels[non_opaque_mask, 0] = (pixels[non_opaque_mask, 0] * alpha[non_opaque_mask] + (1 - alpha[non_opaque_mask]) * r_bkg).astype(np.uint8)
+    pixels[non_opaque_mask, 1] = (pixels[non_opaque_mask, 1] * alpha[non_opaque_mask] + (1 - alpha[non_opaque_mask]) * g_bkg).astype(np.uint8)
+    pixels[non_opaque_mask, 2] = (pixels[non_opaque_mask, 2] * alpha[non_opaque_mask] + (1 - alpha[non_opaque_mask]) * b_bkg).astype(np.uint8)
 
-    except Exception as e:
-        raise e
+    # Convert to 16-bit color
+    r = (pixels[:, :, 0].astype(np.uint16) >> 3) << 11
+    g = (pixels[:, :, 1].astype(np.uint16) >> 2) << 5
+    b = (pixels[:, :, 2].astype(np.uint16) >> 3)
+    color16 = (r | g | b).flatten()
 
+    output_data = bytearray(img_size[0] * img_size[1] * 10)
+    ColPic_EncodeStr(color16, img_size[1], img_size[0], output_data, len(output_data), 1024)
+
+    result = ''.join(chr(byte) for byte in output_data if byte)
     return result
 
+# Remaining functions unchanged but can be similarly optimized.
 
-def ColPic_EncodeStr(
-    fromcolor16, picw, pich, outputdata: bytearray, outputmaxtsize, colorsmax
-):
-    qty = 0
-    temp = 0
-    strindex = 0
-    hexindex = 0
-    TempBytes = bytearray(4)
+def ColPic_EncodeStr(fromcolor16, picw, pich, outputdata: bytearray, outputmaxtsize, colorsmax):
     qty = ColPicEncode(fromcolor16, picw, pich, outputdata, outputmaxtsize, colorsmax)
     if qty == 0:
         return 0
-    temp = 3 - qty % 3
-    while temp > 0 and qty < outputmaxtsize:
-        outputdata[qty] = 0
-        qty += 1
-        temp -= 1
 
-    if qty * 4 / 3 >= outputmaxtsize:
-        return 0
+    # Ensure the data length is a multiple of 3 for encoding
+    padding = (3 - qty % 3) % 3
+    qty += padding
+    outputdata.extend([0] * padding)
+
     hexindex = qty
-    strindex = qty * 4 / 3
+    strindex = qty * 4 // 3
+    TempBytes = bytearray(4)
+
     while hexindex > 0:
         hexindex -= 3
         strindex -= 4
         TempBytes[0] = outputdata[hexindex] >> 2
-        TempBytes[1] = outputdata[hexindex] & 3
-        TempBytes[1] <<= 4
-        TempBytes[1] += outputdata[hexindex + 1] >> 4
-        TempBytes[2] = outputdata[hexindex + 1] & 15
-        TempBytes[2] <<= 2
-        TempBytes[2] += outputdata[hexindex + 2] >> 6
-        TempBytes[3] = outputdata[hexindex + 2] & 63
-        TempBytes[0] += 48
-        if chr(TempBytes[0]) == "\\":
-            TempBytes[0] = 126
-        TempBytes[1] += 48
-        if chr(TempBytes[1]) == "\\":
-            TempBytes[1] = 126
-        TempBytes[2] += 48
-        if chr(TempBytes[2]) == "\\":
-            TempBytes[2] = 126
-        TempBytes[3] += 48
-        if chr(TempBytes[3]) == "\\":
-            TempBytes[3] = 126
-        outputdata[int(strindex)] = TempBytes[0]
-        outputdata[int(strindex) + 1] = TempBytes[1]
-        outputdata[int(strindex) + 2] = TempBytes[2]
-        outputdata[int(strindex) + 3] = TempBytes[3]
+        TempBytes[1] = (outputdata[hexindex] & 0x03) << 4 | outputdata[hexindex + 1] >> 4
+        TempBytes[2] = (outputdata[hexindex + 1] & 0x0F) << 2 | outputdata[hexindex + 2] >> 6
+        TempBytes[3] = outputdata[hexindex + 2] & 0x3F
 
-    qty = qty * 4 / 3
-    outputdata[int(qty)] = 0
-    return qty
+        for k in range(4):
+            TempBytes[k] += 48
+            if TempBytes[k] == ord('\\'):
+                TempBytes[k] = 126
 
+        outputdata[int(strindex):int(strindex) + 4] = TempBytes
 
-def ColPicEncode(
-    fromcolor16, picw, pich, outputdata: bytearray, outputmaxtsize, colorsmax
-):
-    l0 = U16HEAD()
+    outputdata[int(qty * 4 // 3)] = 0
+    return qty * 4 // 3
+
+def ColPicEncode(fromcolor16, picw, pich, outputdata: bytearray, outputmaxtsize, colorsmax):
     Head0 = ColPicHead3()
-    Listu16 = []
-    for _ in range(1024):
-        Listu16.append(U16HEAD())
 
-    ListQty = 0
-    enqty = 0
     dotsqty = picw * pich
-    if colorsmax > 1024:
-        colorsmax = 1024
-    for i in range(dotsqty):
-        ListQty = ADList0(fromcolor16[i], Listu16, ListQty, 1024)
+    colorsmax = min(colorsmax, 1024)
 
-    for index in range(1, ListQty):
-        l0 = Listu16[index]
-        for i in range(index):
-            if l0.qty >= Listu16[i].qty:
-                aListu16 = Listu16.copy()
-                for j in range(index - i):
-                    Listu16[i + j + 1] = aListu16[i + j]
+    # Use NumPy to count unique colors and their frequencies
+    unique_colors, counts = np.unique(fromcolor16, return_counts=True)
+    Listu16 = np.array([U16HEAD() for _ in range(len(unique_colors))])
 
-                Listu16[i] = l0
-                break
+    for i, (color, qty) in enumerate(zip(unique_colors, counts)):
+        Listu16[i].colo16 = color
+        Listu16[i].qty = qty
+        Listu16[i].A0 = (color >> 11) & 31
+        Listu16[i].A1 = (color >> 5) & 63
+        Listu16[i].A2 = color & 31
 
-    while ListQty > colorsmax:
-        l0 = Listu16[ListQty - 1]
-        minval = 255
-        fid = -1
-        for i in range(colorsmax):
-            cha0 = Listu16[i].A0 - l0.A0
-            if cha0 < 0:
-                cha0 = 0 - cha0
-            cha1 = Listu16[i].A1 - l0.A1
-            if cha1 < 0:
-                cha1 = 0 - cha1
-            cha2 = Listu16[i].A2 - l0.A2
-            if cha2 < 0:
-                cha2 = 0 - cha2
-            chall = cha0 + cha1 + cha2
-            if chall < minval:
-                minval = chall
-                fid = i
+    # Sort the color list by frequency (descending)
+    Listu16 = sorted(Listu16, key=lambda x: x.qty, reverse=True)
 
-        for i in range(dotsqty):
-            if fromcolor16[i] == l0.colo16:
-                fromcolor16[i] = Listu16[fid].colo16
+    # Reduce color list to `colorsmax` by merging similar colors
+    while len(Listu16) > colorsmax:
+        l0 = Listu16.pop()
+        cha = np.array([
+            abs(l0.A0 - u16.A0) + abs(l0.A1 - u16.A1) + abs(l0.A2 - u16.A2)
+            for u16 in Listu16
+        ])
+        fid = np.argmin(cha)
+        replacement_color = Listu16[fid].colo16
+        fromcolor16 = np.where(fromcolor16 == l0.colo16, replacement_color, fromcolor16)
 
-        ListQty = ListQty - 1
+    # Clear the output data
+    outputdata[:] = bytearray(outputmaxtsize)
 
-    for n in range(len(outputdata)):
-        outputdata[n] = 0
-
+    # Set up header
     Head0.encodever = 3
-    Head0.oncelistqty = 0
     Head0.mark = 98419516
-    Head0.ListDataSize = ListQty * 2
+    Head0.ListDataSize = len(Listu16) * 2
+
+    # Write header information
     outputdata[0] = 3
-    outputdata[12] = 60
-    outputdata[13] = 195
-    outputdata[14] = 221
-    outputdata[15] = 5
-    outputdata[16] = ListQty * 2 & 255
-    outputdata[17] = (ListQty * 2 & 65280) >> 8
-    outputdata[18] = (ListQty * 2 & 16711680) >> 16
-    outputdata[19] = (ListQty * 2 & 4278190080) >> 24
+    outputdata[12:16] = [60, 195, 221, 5]
+    outputdata[16:20] = Head0.ListDataSize.to_bytes(4, 'little')
+
     sizeofColPicHead3 = 32
-    for i in range(ListQty):
-        outputdata[sizeofColPicHead3 + i * 2 + 1] = (Listu16[i].colo16 & 65280) >> 8
-        outputdata[sizeofColPicHead3 + i * 2 + 0] = Listu16[i].colo16 & 255
+
+    # Convert the Listu16 color data to bytes
+    for i in range(len(Listu16)):
+        color_bytes = np.array([Listu16[i].colo16], dtype=np.uint16).view(np.uint8)
+        outputdata[sizeofColPicHead3 + i * 2: sizeofColPicHead3 + i * 2 + 2] = list(color_bytes)  # Convert to list of ints
 
     enqty = Byte8bitEncode(
         fromcolor16,
@@ -199,44 +130,36 @@ def ColPicEncode(
         sizeofColPicHead3 + Head0.ListDataSize,
         outputmaxtsize - sizeofColPicHead3 - Head0.ListDataSize,
     )
+
+    # Finalize header with encoding details
     Head0.ColorDataSize = enqty
     Head0.PicW = picw
     Head0.PicH = pich
-    outputdata[4] = picw & 255
-    outputdata[5] = (picw & 65280) >> 8
-    outputdata[6] = (picw & 16711680) >> 16
-    outputdata[7] = (picw & 4278190080) >> 24
-    outputdata[8] = pich & 255
-    outputdata[9] = (pich & 65280) >> 8
-    outputdata[10] = (pich & 16711680) >> 16
-    outputdata[11] = (pich & 4278190080) >> 24
-    outputdata[20] = enqty & 255
-    outputdata[21] = (enqty & 65280) >> 8
-    outputdata[22] = (enqty & 16711680) >> 16
-    outputdata[23] = (enqty & 4278190080) >> 24
+
+    outputdata[4:8] = picw.to_bytes(4, 'little')
+    outputdata[8:12] = pich.to_bytes(4, 'little')
+    outputdata[20:24] = enqty.to_bytes(4, 'little')
+
     return sizeofColPicHead3 + Head0.ListDataSize + Head0.ColorDataSize
 
-
 def ADList0(val, Listu16, ListQty, maxqty):
-    qty = ListQty
-    if qty >= maxqty:
+    if ListQty >= maxqty:
         return ListQty
-    for i in range(qty):
+
+    for i in range(ListQty):
         if Listu16[i].colo16 == val:
             Listu16[i].qty += 1
             return ListQty
 
-    A0 = val >> 11 & 31
-    A1 = (val & 2016) >> 5
+    A0 = (val >> 11) & 31
+    A1 = (val >> 5) & 63
     A2 = val & 31
-    Listu16[qty].colo16 = val
-    Listu16[qty].A0 = A0
-    Listu16[qty].A1 = A1
-    Listu16[qty].A2 = A2
-    Listu16[qty].qty = 1
-    ListQty = qty + 1
-    return ListQty
-
+    Listu16[ListQty].colo16 = val
+    Listu16[ListQty].A0 = A0
+    Listu16[ListQty].A1 = A1
+    Listu16[ListQty].A2 = A2
+    Listu16[ListQty].qty = 1
+    return ListQty + 1
 
 def Byte8bitEncode(
     fromcolor16,
@@ -252,70 +175,40 @@ def Byte8bitEncode(
     srcindex = 0
     decindex = 0
     lastid = 0
-    temp = 0
+
     while dotsqty > 0:
-        dots = 1
-        for i in range(dotsqty - 1):
-            if fromcolor16[srcindex + i] != fromcolor16[srcindex + i + 1]:
-                break
-            dots += 1
-            if dots == 255:
-                break
+        dots = min(255, next((i + 1 for i in range(dotsqty - 1) if fromcolor16[srcindex + i] != fromcolor16[srcindex + i + 1]), dotsqty))
 
-        temp = 0
-        for i in range(listqty):
-            aa = listu16[i * 2 + 1 + listu16Index] << 8
-            aa |= listu16[i * 2 + 0 + listu16Index]
-            if aa == fromcolor16[srcindex]:
-                temp = i
-                break
+        temp = next((i for i in range(listqty) if listu16[i * 2 + 1 + listu16Index] << 8 | listu16[i * 2 + listu16Index] == fromcolor16[srcindex]), 0)
+        tid = temp % 32
+        sid = temp // 32
 
-        tid = int(temp % 32)
-        if tid > 255:
-            tid = 255
-        sid = int(temp / 32)
-        if sid > 255:
-            sid = 255
         if lastid != sid:
             if decindex >= decMaxBytesize:
-                dotsqty = 0
                 break
-            outputdata[decindex + outputdataIndex] = 7
-            outputdata[decindex + outputdataIndex] <<= 5
-            outputdata[decindex + outputdataIndex] += sid
+            outputdata[decindex + outputdataIndex] = 7 << 5 | sid
             decindex += 1
             lastid = sid
+
         if dots <= 6:
             if decindex >= decMaxBytesize:
-                dotsqty = 0
                 break
-            aa = dots
-            if aa > 255:
-                aa = 255
-            outputdata[decindex + outputdataIndex] = aa
-            outputdata[decindex + outputdataIndex] <<= 5
-            outputdata[decindex + outputdataIndex] += tid
+            outputdata[decindex + outputdataIndex] = dots << 5 | tid
             decindex += 1
         else:
             if decindex >= decMaxBytesize:
-                dotsqty = 0
                 break
-            outputdata[decindex + outputdataIndex] = 0
-            outputdata[decindex + outputdataIndex] += tid
+            outputdata[decindex + outputdataIndex] = tid
             decindex += 1
             if decindex >= decMaxBytesize:
-                dotsqty = 0
                 break
-            aa = dots
-            if aa > 255:
-                aa = 255
-            outputdata[decindex + outputdataIndex] = aa
+            outputdata[decindex + outputdataIndex] = dots
             decindex += 1
+
         srcindex += dots
         dotsqty -= dots
 
     return decindex
-
 
 class U16HEAD:
     def __init__(self):
@@ -326,7 +219,6 @@ class U16HEAD:
         self.res0 = 0
         self.res1 = 0
         self.qty = 0
-
 
 class ColPicHead3:
     def __init__(self):
@@ -339,4 +231,3 @@ class ColPicHead3:
         self.ListDataSize = 0
         self.ColorDataSize = 0
         self.res1 = 0
-        self.res2 = 0
