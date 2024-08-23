@@ -10,13 +10,15 @@ import time
 import io
 import asyncio
 import traceback
+import aiohttp
 from PIL import Image
-from urllib.request import pathname2url
+
 from src.config import TEMP_DEFAULTS, ConfigHandler
 from watchdog.observers import Observer
 from watchdog.events import PatternMatchingEventHandler
 from math import ceil
-from concurrent.futures import ThreadPoolExecutor 
+from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import quote
 
 from src.tjc import EventType
 from src.response_actions import response_actions, input_actions, custom_touch_actions
@@ -123,7 +125,6 @@ SOCKET_LIMIT = 20 * 1024 * 1024
 
 class DisplayController:
     last_config_change = 0
-
     filament_sensor_name = "filament_sensor"
 
     def __init__(self, config):
@@ -140,6 +141,10 @@ class DisplayController:
             port=self.config.safe_get("general", "serial_port"),
         )
         self._handle_display_config()
+
+        # Initialize lock for current_filename
+        self._filename_lock = asyncio.Lock()
+        self.current_filename = None
 
         self.part_light_state = False
         self.frame_light_state = False
@@ -186,14 +191,15 @@ class DisplayController:
         self.z_probe_step = "0.1"
         self.z_probe_distance = "0.0"
 
-        self.current_filename = None
-
         self.full_bed_leveling_counts = [0, 0]
         self.bed_leveling_counts = [0, 0]
         self.bed_leveling_probed_count = 0
         self.bed_leveling_last_position = None
 
         self.klipper_restart_event = asyncio.Event()
+
+    def pathname2url(self, path):
+        return quote(path.replace("\\", "/"))
 
     def handle_config_change(self):
         if self.last_config_change + 5 > time.time():
@@ -839,7 +845,7 @@ class DisplayController:
         logger.info("Display Type: " + str(self.display.get_display_type_name()))
         logger.info("Printer Model: " + str(self.display.get_device_name()))
         await self.display.initialize_display()
-        self.handle_status_update(data)
+        await self.handle_status_update(data)
 
     async def _send_moonraker_request(self, method, params=None):
         if params is None:
@@ -1008,7 +1014,7 @@ class DisplayController:
                 if fut is not None:
                     fut.set_result(item)
             elif item["method"] == "notify_status_update":
-                self.handle_status_update(item["params"][0])
+                await self.handle_status_update(item["params"][0])
             elif item["method"] == "notify_gcode_response":
                 self.handle_gcode_response(item["params"][0])
         logger.info("Unix Socket Disconnection from _process_stream()")
@@ -1051,7 +1057,6 @@ class DisplayController:
     async def set_data_prepare_screen(self, filename):
         metadata = await self.load_metadata(filename)
         await self.display.set_data_prepare_screen(filename, metadata)
-
         await self.load_thumbnail_for_page(
             filename, self._page_id(PAGE_CONFIRM_PRINT), metadata
         )
@@ -1064,79 +1069,82 @@ class DisplayController:
 
     async def load_thumbnail_for_page(self, filename, page_number, metadata=None):
         logger.info("Loading thumbnail for " + filename)
-        
+
         if metadata is None:
             metadata = await self.load_metadata(filename)
         
-        best_thumbnail = None
-        for thumbnail in metadata["thumbnails"]:
-            if thumbnail["width"] == 160:
-                best_thumbnail = thumbnail
-                break
-            if best_thumbnail is None or thumbnail["width"] > best_thumbnail["width"]:
-                best_thumbnail = thumbnail
-        
-        if best_thumbnail is None:
+        best_thumbnail = self.find_best_thumbnail(metadata)
+        if not best_thumbnail:
             logger.warning(f"No suitable thumbnail found for {filename}")
             if self._get_current_page() == page_number:
                 await self.display.hide_thumbnail()
             return
 
+        path = self.construct_thumbnail_path(filename, best_thumbnail["relative_path"])
+        image = await self.fetch_and_parse_thumbnail(path)
+
+        if image is None:
+            await self.display.hide_thumbnail()
+            return
+        
+        logger.info("Displaying the thumbnail")
+        await self.display.display_thumbnail(page_number, image)
+        logger.info("Thumbnail displayed successfully")
+
+    def find_best_thumbnail(self, metadata):
+        best_thumbnail = None
+        for thumbnail in metadata["thumbnails"]:
+            if thumbnail["width"] == 160:
+                return thumbnail
+            if best_thumbnail is None or thumbnail["width"] > best_thumbnail["width"]:
+                best_thumbnail = thumbnail
+        return best_thumbnail
+
+    def construct_thumbnail_path(self, filename, relative_path):
         path = "/".join(filename.split("/")[:-1])
         if path != "":
             path = path + "/"
-        path += best_thumbnail["relative_path"]
+        return path + relative_path
 
+    async def fetch_and_parse_thumbnail(self, path):
+        url = f"{self.config.safe_get('general', 'moonraker_url', 'http://localhost:7125')}/server/files/gcodes/{self.pathname2url(path)}"
         try:
-            logger.info(f"Fetching thumbnail image from {path}")
-            img = requests.get(
-                f"{self.config.safe_get('general', 'moonraker_url', 'http://localhost:7125')}/server/files/gcodes/{pathname2url(path)}", timeout=5
-            )
+            logger.info(f"Fetching thumbnail image from {url}")
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=5) as resp:
+                    if resp.status != 200:
+                        raise aiohttp.ClientError(f"Failed to fetch thumbnail, status code: {resp.status}")
+                    img_data = await resp.read()
             logger.info("Thumbnail image fetched successfully")
-            thumbnail = Image.open(io.BytesIO(img.content))
+            thumbnail = Image.open(io.BytesIO(img_data))
             logger.info("Thumbnail image opened successfully")
-        except requests.RequestException as e:
-            logger.error(f"Failed to fetch thumbnail: {e}")
-            await self.display.hide_thumbnail()
-            return
-        except IOError as e:
-            logger.error(f"Failed to open thumbnail image: {e}")
-            await self.display.hide_thumbnail()
-            return
+        except (aiohttp.ClientError, IOError) as e:
+            logger.error(f"Failed to fetch or open thumbnail image: {e}")
+            return None
 
-        # Determine background color
-        background = "29354a"
-        if "thumbnails" in self.config:
-            if "background_color" in self.config["thumbnails"]:
-                background = self.config["thumbnails"]["background_color"]
-        
         try:
+            background = self.config["thumbnails"].get("background_color", "29354a")
             logger.info("Starting thumbnail parsing")
             loop = asyncio.get_running_loop()
             with ThreadPoolExecutor(max_workers=2) as pool:
                 image = await loop.run_in_executor(pool, parse_thumbnail, thumbnail, 160, 160, background)
             logger.info("Thumbnail parsing completed")
+            return image
         except Exception as e:
             logger.error(f"Error in thumbnail parsing: {e}")
-            await self.display.hide_thumbnail()
-            return
-        
-        # Display the parsed thumbnail
-        logger.info("Displaying the thumbnail")
-        await self.display.display_thumbnail(page_number, image)
-        logger.info("Thumbnail displayed successfully")
+            return None
 
-    def handle_status_update(self, new_data, data_mapping=None):
+    async def handle_status_update(self, new_data, data_mapping=None):
         if data_mapping is None:
             data_mapping = self.display.mapper.data_mapping
-        if "print_stats" in new_data:
-            if "filename" in new_data["print_stats"]:
-                filename = new_data["print_stats"]["filename"]
+        if "print_stats" in new_data and "filename" in new_data["print_stats"]:
+            filename = new_data["print_stats"]["filename"]
+            async with self._filename_lock:
                 self.current_filename = filename
-                if filename is not None and filename != "":
-                    self._loop.create_task(
-                        self.load_thumbnail_for_page(self.current_filename, self._page_id(PAGE_PRINTING))
-                    )
+            if filename:
+                self._loop.create_task(
+                    self.load_thumbnail_for_page(self.current_filename, self._page_id(PAGE_PRINTING))
+                )
             if "state" in new_data["print_stats"]:
                 state = new_data["print_stats"]["state"]
                 self.current_state = state
