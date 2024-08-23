@@ -52,7 +52,7 @@ class ElegooNeptune4ProMapper(ElegooNeptune4Mapper):
                 formatter=format_temp,
             ),
             MappingLeaf(
-                [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "bedtemp_t")],
+                [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "18")],
                 formatter=lambda x: f"{x:.0f}",
             ),
         ]
@@ -82,7 +82,7 @@ class ElegooNeptune4ProMapper(ElegooNeptune4Mapper):
                     formatter=format_temp,
                 ),
                 MappingLeaf(
-                    [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "out_bedtemp_t")],
+                    [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "28")],
                     formatter=lambda x: f"{x:.0f}",
                 ),
             ],
