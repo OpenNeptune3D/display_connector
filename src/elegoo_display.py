@@ -81,7 +81,7 @@ class ElegooDisplayMapper(Mapper):
         PAGE_PRINTING_DIALOG_SPEED: "print_speed",
         PAGE_PRINTING_DIALOG_FAN: "fan_speed",
         PAGE_PRINTING_DIALOG_FLOW: "flow_speed",
-        PAGE_OVERLAY_LOADING: "wifi_scanning",
+        PAGE_OVERLAY_LOADING: "wifi_scaning",
         PAGE_LIGHTS: "led",
     }
 
