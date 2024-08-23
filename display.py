@@ -1310,7 +1310,7 @@ class DisplayController:
                 self.screw_probe_count += 1
                 self._loop.create_task(
                     self.display.update_screw_level_description(
-                        f"Probing Screws ({ceil(self.screw_probe_count/2)}/4)..."
+                        f"Probing Screws ({ceil(self.screw_probe_count/3)}/4)..."
                     )
                 )
             if "screw (base) :" in response:
