@@ -36,7 +36,7 @@ PAGE_LEVELING = "leveling"
 PAGE_LEVELING_SCREW_ADJUST = "leveling_screw_adjust"
 PAGE_LEVELING_Z_OFFSET_ADJUST = "leveling_z_offset_adjust"
 
-PAGE_OVERLAY_LOADING = "overlay_loading"
+PAGE_OVERLAY_LOADING = "wifi_scaning"
 
 PAGE_LIGHTS = "lights"
 
