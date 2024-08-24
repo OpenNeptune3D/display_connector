@@ -77,7 +77,6 @@ ExecStartPre=/bin/sleep 10
 ExecStart=$SCRIPTPATH/venv/bin/python $SCRIPTPATH/display.py
 WorkingDirectory=$SCRIPTPATH
 Restart=on-failure
-CPUQuota=50%
 RestartSec=10
 User=$USER
 ProtectSystem=full
