@@ -410,18 +410,9 @@ class DisplayController:
                 self._send_moonraker_request("printer.emergency_stop")
             )
         elif action == "pause_print_button":
-            if self.current_state == "paused":
-                logger.info("Resuming print")
-                self._loop.create_task(
-                    self._send_moonraker_request("printer.print.resume")
-                )
-            else:
-                self._go_back()
-                self._navigate_to_page(PAGE_PRINTING_PAUSE)
+            self._loop.create_task(self._handle_pause_resume())
         elif action == "pause_print_confirm":
-            self._go_back()
-            self._loop.create_task(self._send_moonraker_request("printer.print.pause"))
-            logger.info("Pausing print")
+            self._loop.create_task(self._handle_pause_confirm())
         elif action == "stop_print":
             self._go_back()
             self._navigate_to_page(PAGE_OVERLAY_LOADING)
@@ -674,6 +665,19 @@ class DisplayController:
             )
             self._go_back()
             self._navigate_to_page(PAGE_OVERLAY_LOADING)
+
+    async def _handle_pause_resume(self):
+        if self.current_state == "paused":
+            logger.info("Resuming print")
+            await self._send_moonraker_request("printer.print.resume")
+        else:
+            self._go_back()
+            self._navigate_to_page(PAGE_PRINTING_PAUSE)
+
+    async def _handle_pause_confirm(self):
+        self._go_back()
+        logger.info("Pausing print")
+        await self._send_moonraker_request("printer.print.pause")
 
     def _set_light(self, light_name, new_state):
         gcode = f"{light_name}_{'ON' if new_state else 'OFF'}"
@@ -1137,21 +1141,24 @@ class DisplayController:
     async def handle_status_update(self, new_data, data_mapping=None):
         if data_mapping is None:
             data_mapping = self.display.mapper.data_mapping
-        if "print_stats" in new_data and "filename" in new_data["print_stats"]:
-            filename = new_data["print_stats"]["filename"]
-            async with self._filename_lock:
-                self.current_filename = filename
+
+        if "print_stats" in new_data:
+            filename = new_data["print_stats"].get("filename")
             if filename:
+                async with self._filename_lock:
+                    self.current_filename = filename
                 self._loop.create_task(
                     self.load_thumbnail_for_page(self.current_filename, self._page_id(PAGE_PRINTING))
                 )
-            if "state" in new_data["print_stats"]:
-                state = new_data["print_stats"]["state"]
+
+            state = new_data["print_stats"].get("state")
+            if state:
                 self.current_state = state
                 logger.info(f"Status Update: {state}")
                 current_page = self._get_current_page()
-                if state == "printing" or state == "paused":
-                    self._loop.create_task(self.display.update_printing_state_ui(state))
+
+                if state in ["printing", "paused"]:
+                    await self.display.update_printing_state_ui(state)
                     if current_page is None or current_page not in PRINTING_PAGES:
                         self._navigate_to_page(PAGE_PRINTING, clear_history=True)
                 elif state == "complete":
@@ -1166,39 +1173,33 @@ class DisplayController:
                     ):
                         self._navigate_to_page(PAGE_MAIN, clear_history=True)
 
-            if "print_duration" in new_data["print_stats"]:
-                self.current_print_duration = new_data["print_stats"]["print_duration"]
+        if "print_duration" in new_data.get("print_stats", {}):
+            self.current_print_duration = new_data["print_stats"]["print_duration"]
 
-            if (
-                "display_status" in new_data
-                and "progress" in new_data["display_status"]
-                and "print_duration" in new_data["print_stats"]
-            ):
-                if new_data["display_status"]["progress"] > 0:
-                    total_time = (
-                        new_data["print_stats"]["print_duration"]
-                        / new_data["display_status"]["progress"]
-                    )
-                    self._loop.create_task(
-                        self.display.update_time_remaining(
-                            format_time(
-                                total_time - new_data["print_stats"]["print_duration"]
-                            )
-                        )
-                    )
+        progress = new_data.get("display_status", {}).get("progress", 0)
+        if progress > 0 and "print_duration" in new_data.get("print_stats", {}):
+            total_time = self.current_print_duration / progress
+            remaining_time = format_time(total_time - self.current_print_duration)
+            self._loop.create_task(self.display.update_time_remaining(remaining_time))
 
+        self._update_misc_states(new_data, data_mapping)
+
+    def _update_misc_states(self, new_data, data_mapping):
+        # Handle other updates: lights, fans, filament sensor, etc.
         if (
             "output_pin Part_Light" in new_data
             and new_data["output_pin Part_Light"]["value"] is not None
         ):
             self.part_light_state = int(new_data["output_pin Part_Light"]["value"]) == 1
+
         if (
             "output_pin Frame_Light" in new_data
             and new_data["output_pin Frame_Light"]["value"] is not None
         ):
-            self.frame_light_state  = (
+            self.frame_light_state = (
                 int(new_data["output_pin Frame_Light"]["value"]) == 1
             )
+
         if "fan" in new_data:
             self.fan_state = float(new_data["fan"]["speed"]) > 0
             self.printing_target_speeds["fan"] = float(new_data["fan"]["speed"])
@@ -1208,56 +1209,47 @@ class DisplayController:
                     self.printing_target_speeds[self.printing_selected_speed_type],
                 )
             )
-        if (
-            f"filament_switch_sensor {self.filament_sensor_name}" in new_data
-            and new_data[f"filament_switch_sensor {self.filament_sensor_name}"][
-                "enabled"
-            ]
-            is not None
-        ):
-            self.filament_sensor_state = (
-                int(
-                    new_data[f"filament_switch_sensor {self.filament_sensor_name}"][
-                        "enabled"
-                    ]
-                )
-                == 1
-            )
+
+        # Update other heating values, sensors, etc.
+        if f"filament_switch_sensor {self.filament_sensor_name}" in new_data:
+            sensor_data = new_data[f"filament_switch_sensor {self.filament_sensor_name}"]
+            self.filament_sensor_state = int(sensor_data.get("enabled", 0)) == 1
+
         if "configfile" in new_data:
             self.handle_machine_config_change(new_data["configfile"])
 
         if "extruder" in new_data:
-            if "target" in new_data["extruder"]:
-                self.printing_target_temps["extruder"] = new_data["extruder"]["target"]
-                self.printer_heating_value_changed("extruder", new_data["extruder"]["target"])
-        if "heater_bed" in new_data: #remove heater_generic
-            if "target" in new_data["heater_bed"]: 
-                self.printing_target_temps["heater_bed"] = new_data[
-                    "heater_bed"
-                ]["target"]
-                self.printer_heating_value_changed("heater_bed", new_data["heater_bed"]["target"])
+            target = new_data["extruder"].get("target")
+            if target is not None:
+                self.printing_target_temps["extruder"] = target
+                self.printer_heating_value_changed("extruder", target)
+
+        if "heater_bed" in new_data:
+            target = new_data["heater_bed"].get("target")
+            if target is not None:
+                self.printing_target_temps["heater_bed"] = target
+                self.printer_heating_value_changed("heater_bed", target)
+
         if "heater_generic heater_bed_outer" in new_data:
-            if "target" in new_data["heater_generic heater_bed_outer"]:
-                self.printing_target_temps["heater_bed_outer"] = new_data[
-                    "heater_generic heater_bed_outer"
-                ]["target"]
-                self.printer_heating_value_changed("heater_bed_outer", new_data["heater_generic heater_bed_outer"]["target"])
+            target = new_data["heater_generic heater_bed_outer"].get("target")
+            if target is not None:
+                self.printing_target_temps["heater_bed_outer"] = target
+                self.printer_heating_value_changed("heater_bed_outer", target)
 
         if "gcode_move" in new_data:
-            if "extrude_factor" in new_data["gcode_move"]:
-                self.printing_target_speeds["flow"] = float(
-                    new_data["gcode_move"]["extrude_factor"]
-                )
+            extrude_factor = new_data["gcode_move"].get("extrude_factor")
+            if extrude_factor is not None:
+                self.printing_target_speeds["flow"] = float(extrude_factor)
                 self._loop.create_task(
                     self.display.update_printing_speed_settings_ui(
                         self.printing_selected_speed_type,
                         self.printing_target_speeds[self.printing_selected_speed_type],
                     )
                 )
-            if "speed_factor" in new_data["gcode_move"]:
-                self.printing_target_speeds["print"] = float(
-                    new_data["gcode_move"]["speed_factor"]
-                )
+
+            speed_factor = new_data["gcode_move"].get("speed_factor")
+            if speed_factor is not None:
+                self.printing_target_speeds["print"] = float(speed_factor)
                 self._loop.create_task(
                     self.display.update_printing_speed_settings_ui(
                         self.printing_selected_speed_type,
