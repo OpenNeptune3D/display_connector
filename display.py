@@ -1392,20 +1392,30 @@ try:
             controller.klipper_restart_event.set()
 
     config_patterns = ["display_connector.cfg"]
+    socket_patterns = ["klippy.sock", "moonraker.sock"]
+    
+    # Initialize the config event handler
     config_event_handler = PatternMatchingEventHandler(
-        config_patterns, None, True, True
+        patterns=config_patterns, 
+        ignore_patterns=None, 
+        ignore_directories=True, 
+        case_sensitive=True
     )
     config_event_handler.on_modified = handle_wd_callback
     config_event_handler.on_created = handle_wd_callback
 
-    socket_patterns = ["klippy.sock", "moonraker.sock"]
+    # Initialize the socket event handler
     socket_event_handler = PatternMatchingEventHandler(
-        socket_patterns, None, True, True
+        patterns=socket_patterns, 
+        ignore_patterns=None, 
+        ignore_directories=True, 
+        case_sensitive=True
     )
     socket_event_handler.on_modified = handle_sock_changes
     socket_event_handler.on_created = handle_sock_changes
     socket_event_handler.on_deleted = handle_sock_changes
 
+    # Schedule the observers
     config_observer.schedule(config_event_handler, config.file, recursive=False)
     config_observer.schedule(socket_event_handler, comms_directory, recursive=False)
     config_observer.start()
