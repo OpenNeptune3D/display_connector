@@ -1,16 +1,8 @@
+import asyncio
 from logging import Logger
 from src.tjc import TJCClient
 
-
 class DisplayCommunicator:
-    supported_firmware_versions = []
-    current_data = {}
-
-    blocked_by = None
-    blocked_buffer = []
-
-    ips = "--"
-
     def __init__(
         self,
         logger: Logger,
@@ -20,44 +12,66 @@ class DisplayCommunicator:
         baudrate: int = 115200,
         timeout: int = 5,
     ) -> None:
-        self.display_name_override = None
-        self.display_name_line_color = None
-        self.z_display = "mm"
-
         self.logger = logger
         self.model = model
         self.port = port
         self.baudrate = baudrate
         self.timeout = timeout
 
+        self.display_name_override = None
+        self.display_name_line_color = None
+        self.z_display = "mm"
+
+        self.supported_firmware_versions = []
+        self.current_data = {}
+        self.blocked_by = None
+        self.blocked_buffer = []
+        self.ips = "--"
+
         self.display = TJCClient(port, baudrate, event_handler)
         self.display.encoding = "utf-8"
 
     async def connect(self):
-        await self.display.connect()
+        try:
+            await self.display.connect()
+        except Exception as e:
+            self.logger.error(f"Failed to connect to display: {str(e)}")
+            raise
 
     async def write(self, data, timeout=None, blocked_key=None):
-        if self.blocked_by is not None:
-            if self.blocked_by != blocked_key:
-                self.blocked_buffer.append(data)
-                return
+        # Check if currently blocked by another operation
+        if self.blocked_by and self.blocked_by != blocked_key:
+            self.blocked_buffer.append(data)
+            return
         
-        if blocked_key is not None and self.blocked_by is None:
+        # Set blocked state if a blocking key is provided
+        if blocked_key and not self.blocked_by:
             self.blocked_by = blocked_key
-            self.logger.debug(f"Display communication blocked by {blocked_key}")
 
-        await self.display.command(data, timeout if timeout is not None else self.timeout)
+        try:
+            await self.display.command(data, timeout if timeout is not None else self.timeout)
+        except Exception as e:
+            self.logger.error(f"Failed to write to display: {str(e)}")
+            raise
+        finally:
+            # If this was a blocking operation, unblock afterwards
+            if blocked_key:
+                await self.unblock(blocked_key)
 
     async def unblock(self, blocked_key):
         if self.blocked_by == blocked_key:
-            while len(self.blocked_buffer) > 0:
-                data = self.blocked_buffer.pop(0)
-                await self.write(data, blocked_key=blocked_key)
             self.blocked_by = None
-            self.logger.debug(f"Display communication unblocked by {blocked_key}")
+            if self.blocked_buffer:
+                next_command = self.blocked_buffer.pop(0)
+                await self.write(next_command)
 
     async def get_firmware_version(self) -> str:
-        pass
+        try:
+            version = await self.display.get_firmware_version()  # Hypothetical correct method in TJCClient
+            return version
+        except Exception as e:
+            self.logger.error(f"Failed to retrieve firmware version: {str(e)}")
+            return ""
 
     async def check_valid_version(self):
         version = await self.get_firmware_version()
@@ -75,52 +89,58 @@ class DisplayCommunicator:
     def get_display_type_name(self):
         return self.__class__.__name__
 
-    def get_current_data(self, path):
-        index = 0
+    async def retrieve_nested_data(self, path):
         current = self.current_data
-        while index < len(path) and path[index] in current:
-            current = current[path[index]]
-            index += 1
-        if index < len(path):
-            return None
+        for key in path:
+            current = current.get(key)
+            if current is None:
+                return None
         return current
 
     async def navigate_to(self, page_id):
         await self.write(f"page {page_id}")
+        await asyncio.sleep(0.2)  # Small delay to ensure the page change is processed
 
     async def update_data(self, new_data, data_mapping=None, current_data=None):
         if data_mapping is None:
-            data_mapping = self.data_mapping
+            data_mapping = self.data_mapping  # Ensure `self.data_mapping` is set elsewhere
         if current_data is None:
-            if len(self.current_data) == 0:
-                self.current_data = new_data
             current_data = self.current_data
+            if not current_data:
+                self.current_data = new_data
+        
+        await self._update_data_recursive(new_data, data_mapping, current_data)
+
+    async def _update_data_recursive(self, new_data, data_mapping, current_data):
         is_dict = isinstance(new_data, dict)
         for key in new_data if is_dict else range(len(new_data)):
             if key in data_mapping:
                 value = new_data[key]
                 mapping_value = data_mapping[key]
                 if isinstance(mapping_value, dict):
-                    mapping_current = current_data[key] if key in current_data else {}
-                    await self.update_data(value, mapping_value, mapping_current)
+                    mapping_current = current_data.setdefault(key, {})
+                    await self._update_data_recursive(value, mapping_value, mapping_current)
                 elif isinstance(mapping_value, list):
-                    for mapping_leaf in mapping_value:
-                        if mapping_leaf.required_fields is None:
-                            formatted = mapping_leaf.format(value)
-                        else:
-                            required_values = [
-                                self.get_current_data(required_field)
-                                for required_field in mapping_leaf.required_fields
-                            ]
-                            formatted = mapping_leaf.format_with_required(
-                                value, *required_values
-                            )
-                        for mapped_key in mapping_leaf.fields:
-                            if mapping_leaf.field_type == "txt":
-                                await self.write(
-                                    f'{mapped_key}.{mapping_leaf.field_type}="{formatted}"'
-                                )
-                            else:
-                                await self.write(
-                                    f"{mapped_key}.{mapping_leaf.field_type}={formatted}"
-                                )
+                    await self._update_data_leaf(value, mapping_value)
+
+    async def _update_data_leaf(self, value, mapping_value):
+        for mapping_leaf in mapping_value:
+            formatted = await self._format_value(mapping_leaf, value)
+            for mapped_key in mapping_leaf.fields:
+                command = (
+                    f'{mapped_key}.{mapping_leaf.field_type}="{formatted}"'
+                    if mapping_leaf.field_type == "txt"
+                    else f"{mapped_key}.{mapping_leaf.field_type}={formatted}"
+                )
+                await self.write(command)
+                await asyncio.sleep(0.05)  # Small delay to ensure each command is processed
+
+    async def _format_value(self, mapping_leaf, value):
+        if not mapping_leaf.required_fields:
+            return mapping_leaf.format(value)
+        else:
+            required_values = [
+                await self.retrieve_nested_data(required_field)
+                for required_field in mapping_leaf.required_fields
+            ]
+            return mapping_leaf.format_with_required(value, *required_values)
