@@ -746,6 +746,8 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
         )
 
     async def show_bed_mesh_final(self):
+        await self.write("vis nozzletemp,0")
+        await self.write("vis bedtemp,0")
         await self.update_kamp_text("Bed Mesh completed")
         await self.write(
             'xstr 0,350,272,30,1,65535,10665,1,1,1,"Tap SAVE to update printer config and restart"'
