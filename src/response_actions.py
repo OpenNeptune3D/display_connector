@@ -183,7 +183,7 @@ response_actions = {
         8: "page " + PAGE_PREPARE_EXTRUDER,
     },
     # Confirm Emergency Stop
-    106: {0: "emergency_stop", 1: "go_back"},
+    108: {0: "emergency_stop", 1: "go_back"},
     # Printing Adjust
     127: {
         1: "zoffsetchange_0.01",
