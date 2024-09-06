@@ -1,5 +1,3 @@
-import asyncio
-import logging
 import struct
 from collections import namedtuple
 from enum import IntEnum
@@ -7,30 +5,27 @@ from nextion import Nextion
 from nextion.protocol.nextion import NextionProtocol
 from nextion.exceptions import CommandTimeout, ConnectionFailed
 
-# Define the payloads
+# Named tuples for various payloads
 TJCTouchDataPayload = namedtuple("Touch", "page_id component_id")
 TJCStringInputPayload = namedtuple("String", "page_id component_id string")
 TJCNumericInputPayload = namedtuple("Numeric", "page_id component_id value")
 TJCTouchCoordinatePayload = namedtuple("TouchCoordinate", "x y touch_event")
 
-# Define event types
+# Enum for event types
 class EventType(IntEnum):
-    TOUCH = 0x65  # Touch event
-    TOUCH_COORDINATE = 0x67  # Touch coordinate
-    TOUCH_IN_SLEEP = 0x68  # Touch event in sleep mode
+    TOUCH = 0x65
+    TOUCH_COORDINATE = 0x67
+    TOUCH_IN_SLEEP = 0x68
     SLIDER_INPUT = 0x69
-    NUMERIC_INPUT = 0x72  # Numeric input
-    AUTO_SLEEP = 0x86  # Device automatically enters into sleep mode
-    AUTO_WAKE = 0x87  # Device automatically wake up
-    STARTUP = 0x88  # System successful start up
-    SD_CARD_UPGRADE = 0x89  # Start SD card upgrade
-    RECONNECTED = 0x666  # Device reconnected
+    NUMERIC_INPUT = 0x72
+    AUTO_SLEEP = 0x86
+    AUTO_WAKE = 0x87
+    STARTUP = 0x88
+    SD_CARD_UPGRADE = 0x89
+    RECONNECTED = 0x666
 
-# Define constant values
 JUNK_DATA = b"Z\xa5\x06\x83\x10>\x01\x00"
-EOL = b'\xFF\xFF\xFF'
 
-# Custom protocol implementation
 class TJCProtocol(NextionProtocol):
     PACKET_LENGTH_MAP = {
         0x00: 6,  # Nextion Startup
@@ -41,6 +36,7 @@ class TJCProtocol(NextionProtocol):
         0x68: 9,  # Touch Coordinate(sleep)
         0x69: 8,  # Slider Value
         0x71: 8,  # Numeric Data Enclosed
+        0x72: 8,  # Numneric Input
         0x86: 4,  # Auto Entered Sleep Mode
         0x87: 4,  # Auto Wake from Sleep
         0x88: 4,  # Nextion Ready
@@ -50,25 +46,24 @@ class TJCProtocol(NextionProtocol):
     }
 
     def is_event(self, message):
+        """Check if the message is a recognized event."""
         return len(message) > 0 and message[0] in EventType.__members__.values()
 
     def data_received(self, data):
+        """Process received data and handle messages."""
         self.buffer += data
-
         while True:
             message, was_keyboard_input = self._extract_packet()
-
-            if message is None:  # EOL not found or incomplete packet
+            if message is None:
                 break
-
             self._reset_dropped_buffer()
-
             if self.is_event(message) or was_keyboard_input:
                 self.event_message_handler(message)
             else:
                 self.queue.put_nowait(message)
 
     def _extract_packet(self):
+        """Extract a packet from the buffer based on the expected length."""
         if len(self.buffer) < 3:
             return None, False
 
@@ -77,56 +72,49 @@ class TJCProtocol(NextionProtocol):
 
         if expected_length:
             return self._extract_fixed_length_packet(expected_length)
-        else:
-            return self._extract_varied_length_packet()
+        return self._extract_varied_length_packet()
 
     def _extract_fixed_length_packet(self, expected_length):
-        buffer_len = len(self.buffer)
-        was_keyboard_input = False
-
-        # Ensure the buffer is long enough for the expected packet length
-        if buffer_len < expected_length:
-            if buffer_len == 5 and (self.buffer[0] == 0x72 or self.buffer[0] == 0x71):
+        """Extract a fixed-length packet from the buffer."""
+        if len(self.buffer) < expected_length:
+            if len(self.buffer) == 5 and self.buffer[0] in {0x71, 0x72}:
                 expected_length = 5
             else:
                 return None, False
 
         full_message = self.buffer[:expected_length]
 
-        # Handle special cases for keyboard input (e.g., 0x71) and ensure it ends with EOL
-        if full_message[0] == 0x71 and not full_message.endswith(EOL):
-            full_message += EOL
+        if full_message[0] == 0x71 and not full_message.endswith(self.EOL):
+            full_message += self.EOL
             full_message = b"\x72" + full_message[1:]
             was_keyboard_input = True
+        else:
+            was_keyboard_input = False
 
-        # If still no EOL, it's likely a varied-length packet or corrupted data
-        if not full_message.endswith(EOL):
-            message = self._handle_incomplete_fixed_packet(expected_length)
+        if not full_message.endswith(self.EOL):
+            if full_message[0] == 0x65:
+                full_message = self.buffer[:expected_length + 1]
+                if full_message.endswith(self.EOL):
+                    self.buffer = self.buffer[expected_length + 1:]
+                    return full_message[:-3], was_keyboard_input
+
+            message = self._extract_varied_length_packet()
             if message is None:
-                return None, False
-            self.dropped_buffer += message + EOL
+                return None, was_keyboard_input
+
+            self.dropped_buffer += message + self.EOL
             return self._extract_packet()
 
-        # Clean up the buffer
         self.buffer = self.buffer[expected_length:]
-
-        # Handle case where the buffer starts with EOL, likely due to keyboard input
-        if self.buffer.startswith(EOL):
+        if self.buffer.startswith(self.EOL):
             self.buffer = self.buffer[3:]
             was_keyboard_input = False
 
         return full_message[:-3], was_keyboard_input
 
-    def _handle_incomplete_fixed_packet(self, expected_length):
-        if self.buffer[0] == 0x65:  # Touch event that might have the press/release byte
-            extended_message = self.buffer[: expected_length + 1]
-            if extended_message.endswith(EOL):
-                self.buffer = self.buffer[expected_length + 1 :]
-                return extended_message[:-3]
-        return None
-
     def _extract_varied_length_packet(self):
-        message, eol, leftover = self.buffer.partition(EOL)
+        """Extract a varied-length packet from the buffer."""
+        message, eol, leftover = self.buffer.partition(self.EOL)
         if not eol:
             if message.startswith(JUNK_DATA):
                 self.buffer = leftover
@@ -136,81 +124,62 @@ class TJCProtocol(NextionProtocol):
         self.buffer = leftover
         return message, False
 
-# Client implementation
 class TJCClient(Nextion):
     is_reconnecting = False
-    _lock = asyncio.Lock()
 
     def _make_protocol(self):
+        """Create a TJCProtocol instance."""
         return TJCProtocol(event_message_handler=self.event_message_handler)
 
     def event_message_handler(self, message):
-        typ = message[0]
+        """Handle incoming event messages with error checking."""
         try:
-            if typ == EventType.TOUCH_COORDINATE:
-                # Ensure the message length is correct before unpacking
-                if len(message) >= 6:  # 1 byte for type + 5 bytes for payload
-                    payload = TJCTouchCoordinatePayload._make(struct.unpack(">HHB", message[1:]))
-                    self._schedule_event_message_handler(EventType(typ), payload)
+            event_type = EventType(message[0])
+            payload_map = {
+                EventType.TOUCH_COORDINATE: (">HHB", TJCTouchCoordinatePayload),
+                EventType.TOUCH: ("BB", TJCTouchDataPayload),
+                EventType.NUMERIC_INPUT: ("BBH", TJCNumericInputPayload),
+                EventType.SLIDER_INPUT: ("BBH", TJCNumericInputPayload),
+            }
+
+            if event_type in payload_map:
+                format_str, payload_type = payload_map[event_type]
+                payload_length = struct.calcsize(format_str)
+
+                if len(message[1:]) >= payload_length:
+                    payload = struct.unpack(format_str, message[1:])
+                    self._schedule_event_message_handler(event_type, payload_type._make(payload))
                 else:
-                    raise ValueError(f"Invalid message length for TOUCH_COORDINATE: {len(message)}")
-            elif typ == EventType.TOUCH:  # Touch event
-                if len(message) >= 3:  # 1 byte for type + 2 bytes for payload
-                    payload = TJCTouchDataPayload._make(struct.unpack("BB", message[1:]))
-                    self._schedule_event_message_handler(EventType(typ), payload)
-                else:
-                    raise ValueError(f"Invalid message length for TOUCH: {len(message)}")
-            elif typ == EventType.NUMERIC_INPUT:
-                if len(message) >= 4:  # 1 byte for type + 3 bytes for payload
-                    payload = TJCNumericInputPayload._make(struct.unpack("BBH", message[1:]))
-                    self._schedule_event_message_handler(EventType(typ), payload)
-                else:
-                    raise ValueError(f"Invalid message length for NUMERIC_INPUT: {len(message)}")
-            elif typ == EventType.SLIDER_INPUT:
-                if len(message) >= 4:  # 1 byte for type + 3 bytes for payload
-                    payload = TJCNumericInputPayload._make(struct.unpack("BBH", message[1:]))
-                    self._schedule_event_message_handler(EventType(typ), payload)
-                else:
-                    raise ValueError(f"Invalid message length for SLIDER_INPUT: {len(message)}")
+                    self.logger.error(f"Received message with insufficient data for {event_type.name}: {message[1:]}")
             else:
-                super().event_message_handler(message)
+                self.logger.warning(f"Unhandled message type: {event_type.name} with data: {message}")
+
         except struct.error as e:
-            logging.error(f"Error unpacking message {message}: {e}")
-        except ValueError as e:
-            logging.error(f"Invalid message: {message} - {e}")
+            self.logger.error(f"Struct error while unpacking message: {message}, error: {e}")
+        except Exception as e:
+            self.logger.error(f"Unexpected error while handling message: {message}, error: {e}")
 
     async def reconnect(self):
-        async with self._lock:
-            if not self._connection.is_closing():
-                await self._connection.close()
-            self.is_reconnecting = True
-            await self.connect()
+        """Reconnect to the device."""
+        await self._connection.close()
+        self.is_reconnecting = True
+        await self.connect()
 
     async def connect(self) -> None:
-        async with self._lock:
+        """Connect to the device with error handling."""
+        try:
+            await self._try_connect_on_different_baudrates()
             try:
-                # Attempt connection with a timeout to prevent hanging indefinitely
-                await asyncio.wait_for(self._try_connect_on_different_baudrates(), timeout=10.0)
+                await self._command("bkcmd=3", attempts=1)
+            except CommandTimeout:
+                pass
 
-                try:
-                    await self._command("bkcmd=3", attempts=1)
-                except CommandTimeout:
-                    logging.warning("CommandTimeout during initial connect, proceeding anyway.")
-                    pass  # it is fine
-
-                await self._update_sleep_status()
-                if self.is_reconnecting:
-                    self.is_reconnecting = False
-                    self._schedule_event_message_handler(EventType.RECONNECTED, None)
-            except asyncio.TimeoutError:
-                logging.error("Connection attempt timed out.")
-                raise ConnectionFailed("Connection attempt timed out.")
-            except ConnectionFailed:
-                logging.error("ConnectionFailed: Unable to connect to the device.")
-                raise
-            except asyncio.CancelledError:
-                logging.warning("Connection task was cancelled.")
-                raise
-            except Exception as e:
-                logging.exception(f"Unexpected error during connection: {e}")
-                raise
+            await self._update_sleep_status()
+            if self.is_reconnecting:
+                self.is_reconnecting = False
+                self._schedule_event_message_handler(EventType.RECONNECTED, None)
+        except ConnectionFailed:
+            raise
+        except Exception as e:
+            # Log the exception or handle it appropriately
+            raise e
