@@ -1,4 +1,5 @@
-
+import asyncio
+from logging import Logger
 from src.communicator import DisplayCommunicator
 from src.mapping import (
     Mapper,
@@ -322,21 +323,42 @@ class ElegooDisplayMapper(Mapper):
             ]
         }
 
-
 class ElegooDisplayCommunicator(DisplayCommunicator):
-    supported_firmware_versions = ["1.2.11", "1.2.12", "1.2.13"]
+    supported_firmware_versions = ["1.2.11", "1.2.12", "1.2.13", "1.2.14"]
 
-    bed_leveling_box_size = 20
+    def __init__(self, logger: Logger, model: str, port: str, event_handler, baudrate: int = 115200, timeout: int = 5):
+        # Call the base class constructor
+        super().__init__(logger, model, port, event_handler, baudrate, timeout)
+
+        # Firmware version attribute initialized
+        self._firmware_version = None
 
     async def get_firmware_version(self) -> str:
-        return await self.display.get("information.lversion.txt", self.timeout)
+        if self._firmware_version is None:  # Check if the firmware version is cached
+            self._firmware_version = await self.display.get("information.lversion.txt", self.timeout)
+        return self._firmware_version
+
+    async def send_warning_message(self):
+        await asyncio.sleep(0.6)  # Add delay if needed
+        await self.write(
+            f'xstr 0,464,320,16,2,{TEXT_WARNING},{BACKGROUND_GRAY},1,1,1,"WARNING: Unsupported Display Firmware Version"'
+        )
 
     async def check_valid_version(self):
-        is_valid = await super().check_valid_version()
-        if not is_valid:
-            await self.write(
-                f'xstr 0,464,320,16,2,{TEXT_WARNING},{BACKGROUND_GRAY},1,1,1,"WARNING: Unsupported Display Firmware Version"'
+        version = await self.get_firmware_version()
+        version = version.strip()  # Ensure no extra spaces or characters
+        self.logger.debug(f"Comparing '{version}' against supported versions: {self.supported_firmware_versions}")
+        self.logger.info(f"Retrieved firmware version: {version}")
+
+        if version not in self.supported_firmware_versions:
+            self.logger.error(
+                "Unsupported firmware version. Consider updating to a supported version: "
+                + ", ".join(self.supported_firmware_versions)
             )
+            asyncio.create_task(self.send_warning_message())  # Send warning asynchronously
+            return False
+        return True
+
 
     async def special_page_handling(self, current_page):
         if current_page == PAGE_MAIN:
