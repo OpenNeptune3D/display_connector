@@ -25,6 +25,7 @@ class ElegooNeptune4Mapper(ElegooDisplayMapper):
 
 class ElegooNeptune4ProMapper(ElegooNeptune4Mapper):
     def __init__(self) -> None:
+        super().__init__()  # Call the parent class constructor first to initialize attributes
         self.page_mapping[PAGE_PREPARE_TEMP] = "pretemp"
         self.page_mapping[PAGE_PRINTING_FILAMENT] = "adjusttemp_pro"
         super().__init__()
@@ -108,14 +109,7 @@ class ElegooNeptune4DisplayCommunicator(ElegooDisplayCommunicator):
         baudrate: int = 115200,
         timeout: int = 5,
     ) -> None:
-        super().__init__(
-            logger,
-            model,
-            port if port else "/dev/ttyS1",
-            event_handler,
-            baudrate,
-            timeout,
-        )
+        super().__init__(logger, model, port if port else "/dev/ttyS1", event_handler, baudrate, timeout)
         self.mapper = self.get_mapper(model)
         self.has_two_beds = model.lower() == MODEL_N4_PRO.lower()
 
