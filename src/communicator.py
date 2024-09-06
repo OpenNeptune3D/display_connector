@@ -22,12 +22,12 @@ class DisplayCommunicator:
         self.display_name_line_color = None
         self.z_display = "mm"
 
-        self.supported_firmware_versions = []
         self.current_data = {}
         self.blocked_by = None
         self.blocked_buffer = []
         self.ips = "--"
 
+        # Ensure TJCClient is properly instantiated
         self.display = TJCClient(port, baudrate, event_handler)
         self.display.encoding = "utf-8"
 
@@ -65,24 +65,6 @@ class DisplayCommunicator:
                 next_command = self.blocked_buffer.pop(0)
                 await self.write(next_command)
 
-    async def get_firmware_version(self) -> str:
-        try:
-            version = await self.display.get_firmware_version()  # Hypothetical correct method in TJCClient
-            return version
-        except Exception as e:
-            self.logger.error(f"Failed to retrieve firmware version: {str(e)}")
-            return ""
-
-    async def check_valid_version(self):
-        version = await self.get_firmware_version()
-        if version not in self.supported_firmware_versions:
-            self.logger.error(
-                "Unsupported firmware version. Things may not work as expected. Consider updating to a supported version: "
-                + ", ".join(self.supported_firmware_versions)
-            )
-            return False
-        return True
-
     def get_device_name(self):
         return self.model
     
@@ -113,7 +95,9 @@ class DisplayCommunicator:
 
     async def _update_data_recursive(self, new_data, data_mapping, current_data):
         is_dict = isinstance(new_data, dict)
-        for key in new_data if is_dict else range(len(new_data)):
+        keys_to_iterate = list(new_data.keys()) if is_dict else range(len(new_data))
+        
+        for key in keys_to_iterate:
             if key in data_mapping:
                 value = new_data[key]
                 mapping_value = data_mapping[key]
