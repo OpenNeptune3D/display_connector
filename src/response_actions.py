@@ -254,10 +254,11 @@ custom_touch_actions = {
         (200, 0, 260, 50): "page " + PAGE_SHUTDOWN_DIALOG,
     },
     "shutdown_dialog": {
-        (24, 104, 248, 154): "shutdown_host",
-        (24, 158, 248, 208): "reboot_host",
-        (24, 212, 248, 262): "reboot_klipper",
-        (0, 0, 272, 480): "go_back",
+        (24, 104, 248, 154): "shutdown_host",     # Shutdown Host button
+        (24, 158, 248, 208): "reboot_host",       # Reboot Host button
+        (24, 212, 248, 262): "reboot_klipper",    # Reboot Klipper button
+        (24, 266, 248, 316): "firmware_restart",  # Firmware Restart button (new)
+        (24, 320, 248, 370): "go_back",           # Back button
     },
     "printing_kamp": {(40, 400, 230, 450): "save_config"},
 }
