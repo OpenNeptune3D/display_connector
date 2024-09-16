@@ -420,11 +420,12 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
         elif current_page == PAGE_PRINTING_DIALOG_FLOW:
             await self.write("b[3].maxval=200")
         elif current_page == PAGE_SHUTDOWN_DIALOG:
-            await self.write("fill 20,100,232,240," + str(BACKGROUND_DIALOG))
+            await self.write("fill 20,100,232,290," + str(BACKGROUND_DIALOG))  # Increased height to 290
             await self.write('xstr 24,104,224,50,1,65535,10665,1,1,1,"Shut Down Host"')
             await self.write('xstr 24,158,224,50,1,65535,10665,1,1,1,"Reboot Host"')
             await self.write('xstr 24,212,224,50,1,65535,10665,1,1,1,"Reboot Klipper"')
-            await self.write('xstr 24,286,224,50,1,65535,10665,1,1,1,"Back"')
+            await self.write('xstr 24,266,224,50,1,65535,10665,1,1,1,"Firmware Restart"')  # New option added
+            await self.write('xstr 24,320,224,50,1,65535,10665,1,1,1,"Back"')  # Position remains at 320
 
     async def update_printing_heater_settings_ui(
         self, printing_selected_heater, printing_target_temp
