@@ -319,7 +319,7 @@ class OpenNeptuneDisplayMapper(Mapper):
 
 
 class OpenNeptuneDisplayCommunicator(ElegooDisplayCommunicator):
-    supported_firmware_versions = ["ON2.0.0"]
+    supported_firmware_versions = ["0.1.5"]
 
     bed_leveling_box_size = 20
 
