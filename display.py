@@ -575,13 +575,10 @@ class DisplayController:
             if self.current_state != "printing":  # Check if the state is not 'printing'
                 parts = action.split("_")
                 direction = parts[1]
-                target_temp = 200
+                loadtype = "LOAD" if direction == "+" else "UNLOAD"
                 # Send GCODE commands in sequence:
                 gcode_sequence = f"""
-                M83
-                SET_HEATER_TEMPERATURE HEATER=extruder TARGET={target_temp}
-                TEMPERATURE_WAIT SENSOR=extruder MINIMUM={target_temp - 4} MAXIMUM={target_temp + 40}
-                G1 E{direction}{self.extrude_amount} F{self.extrude_speed}
+                {loadtype}_FILAMENT
                 """
                 # Send the full GCODE sequence
                 self._loop.create_task(self.send_gcodes_async(gcode_sequence.strip().split('\n')))
