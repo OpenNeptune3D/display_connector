@@ -128,6 +128,8 @@ class DisplayController:
     filament_sensor_name = "filament_sensor"
 
     def __init__(self, config):
+        self._filename_lock = asyncio.Lock()
+        self.pending_reqs_lock = asyncio.Lock()
         self.config = config
         self._handle_config()
         self.connected = False
@@ -871,7 +873,8 @@ class DisplayController:
             params = {}
         message = self._make_rpc_msg(method, **params)
         fut = self._loop.create_future()
-        self.pending_reqs[message["id"]] = fut
+        async with self.pending_reqs_lock:
+            self.pending_reqs[message["id"]] = fut
         data = json.dumps(message).encode() + b"\x03"
         try:
             self.writer.write(data)
@@ -1029,7 +1032,8 @@ class DisplayController:
                 continue
             errors_remaining = 10
             if "id" in item:
-                fut = self.pending_reqs.pop(item["id"], None)
+                async with self.pending_reqs_lock:
+                    fut = self.pending_reqs.pop(item["id"], None)
                 if fut is not None:
                     fut.set_result(item)
             elif item["method"] == "notify_status_update":
@@ -1074,11 +1078,12 @@ class DisplayController:
         return None
 
     async def set_data_prepare_screen(self, filename):
-        metadata = await self.load_metadata(filename)
-        await self.display.set_data_prepare_screen(filename, metadata)
-        await self.load_thumbnail_for_page(
-            filename, self._page_id(PAGE_CONFIRM_PRINT), metadata
-        )
+        async with self._filename_lock:
+            metadata = await self.load_metadata(filename)
+            await self.display.set_data_prepare_screen(filename, metadata)
+            await self.load_thumbnail_for_page(
+                filename, self._page_id(PAGE_CONFIRM_PRINT), metadata
+            )
 
     async def load_metadata(self, filename):
         metadata = await self._send_moonraker_request(
