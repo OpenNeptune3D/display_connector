@@ -1,42 +1,43 @@
 # Copyright (c) 2023 Molodos
 
 # The ElegooNeptuneThumbnails plugin is released under the terms of the AGPLv3 or higher.
-
+from threading import Lock
 import numpy as np
 from PIL import Image, ImageColor
 
+thumbnail_lock = Lock()
+
 def parse_thumbnail(img, width, height, default_background) -> str:
-    img.thumbnail((width, height))
-    img = img.convert("RGBA")
-    pixels = np.array(img)
-    img_size = pixels.shape[:2]
+    with thumbnail_lock:
+        img.thumbnail((width, height))
+        img = img.convert("RGBA")
+        pixels = np.array(img)
+        img_size = pixels.shape[:2]
 
-    # Ensure the background color is in the correct format
-    r_bkg, g_bkg, b_bkg = ImageColor.getcolor(
-        default_background if default_background.startswith("#") else "#" + default_background,
-        "RGB"
-    )
+        # Ensure the background color is in the correct format
+        r_bkg, g_bkg, b_bkg = ImageColor.getcolor(
+            default_background if default_background.startswith("#") else "#" + default_background,
+            "RGB"
+        )
 
-    # Alpha blending optimization
-    alpha = pixels[:, :, 3] / 255.0
-    non_opaque_mask = alpha != 1.0
-    pixels[non_opaque_mask, 0] = (pixels[non_opaque_mask, 0] * alpha[non_opaque_mask] + (1 - alpha[non_opaque_mask]) * r_bkg).astype(np.uint8)
-    pixels[non_opaque_mask, 1] = (pixels[non_opaque_mask, 1] * alpha[non_opaque_mask] + (1 - alpha[non_opaque_mask]) * g_bkg).astype(np.uint8)
-    pixels[non_opaque_mask, 2] = (pixels[non_opaque_mask, 2] * alpha[non_opaque_mask] + (1 - alpha[non_opaque_mask]) * b_bkg).astype(np.uint8)
+        # Alpha blending optimization
+        alpha = pixels[:, :, 3] / 255.0
+        non_opaque_mask = alpha != 1.0
+        pixels[non_opaque_mask, 0] = (pixels[non_opaque_mask, 0] * alpha[non_opaque_mask] + (1 - alpha[non_opaque_mask]) * r_bkg).astype(np.uint8)
+        pixels[non_opaque_mask, 1] = (pixels[non_opaque_mask, 1] * alpha[non_opaque_mask] + (1 - alpha[non_opaque_mask]) * g_bkg).astype(np.uint8)
+        pixels[non_opaque_mask, 2] = (pixels[non_opaque_mask, 2] * alpha[non_opaque_mask] + (1 - alpha[non_opaque_mask]) * b_bkg).astype(np.uint8)
 
-    # Convert to 16-bit color
-    r = (pixels[:, :, 0].astype(np.uint16) >> 3) << 11
-    g = (pixels[:, :, 1].astype(np.uint16) >> 2) << 5
-    b = (pixels[:, :, 2].astype(np.uint16) >> 3)
-    color16 = (r | g | b).flatten()
+        # Convert to 16-bit color
+        r = (pixels[:, :, 0].astype(np.uint16) >> 3) << 11
+        g = (pixels[:, :, 1].astype(np.uint16) >> 2) << 5
+        b = (pixels[:, :, 2].astype(np.uint16) >> 3)
+        color16 = (r | g | b).flatten()
 
-    output_data = bytearray(img_size[0] * img_size[1] * 10)
-    ColPic_EncodeStr(color16, img_size[1], img_size[0], output_data, len(output_data), 1024)
+        output_data = bytearray(img_size[0] * img_size[1] * 10)
+        ColPic_EncodeStr(color16, img_size[1], img_size[0], output_data, len(output_data), 1024)
 
-    result = ''.join(chr(byte) for byte in output_data if byte)
-    return result
-
-# Remaining functions unchanged but can be similarly optimized.
+        result = ''.join(chr(byte) for byte in output_data if byte)
+        return result
 
 def ColPic_EncodeStr(fromcolor16, picw, pich, outputdata: bytearray, outputmaxtsize, colorsmax):
     qty = ColPicEncode(fromcolor16, picw, pich, outputdata, outputmaxtsize, colorsmax)
