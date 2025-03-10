@@ -1344,11 +1344,11 @@ class DisplayController:
             x_count = int(parts[0].strip(" ()"))
             y_count = int(parts[1][:-1].strip(" ()"))
             self.bed_leveling_counts = [x_count, y_count]
-        elif response.startswith("// bed_mesh: generated points"):
+        elif response.startswith("// Adapted mesh bounds"):
             self.bed_leveling_probed_count = 0
             if self._get_current_page() != PAGE_PRINTING_KAMP:
                 self._loop.create_task(self._navigate_to_page(PAGE_PRINTING_KAMP))
-        elif response.startswith("// probe at "):
+        elif response.startswith("// probe at"):
             if self._get_current_page() != PAGE_PRINTING_KAMP:
                 # We are not leveling, likely response came from manual probe e.g. from console,
                 # Skip updating the state, otherwise it messes up bed leveling screen when printing
