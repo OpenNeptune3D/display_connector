@@ -39,7 +39,7 @@ class ElegooNeptune4ProMapper(ElegooNeptune4Mapper):
                 formatter=format_temp,
             ),
             MappingLeaf(
-                [build_accessor(self.map_page(PAGE_PREPARE_TEMP), 17)],
+                [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "nozzle")],
                 formatter=lambda x: f"{x:.0f}",
             ),
         ]
@@ -52,7 +52,7 @@ class ElegooNeptune4ProMapper(ElegooNeptune4Mapper):
                 formatter=format_temp,
             ),
             MappingLeaf(
-                [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "18")],
+                [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "bed")],
                 formatter=lambda x: f"{x:.0f}",
             ),
         ]
@@ -82,7 +82,7 @@ class ElegooNeptune4ProMapper(ElegooNeptune4Mapper):
                     formatter=format_temp,
                 ),
                 MappingLeaf(
-                    [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "28")],
+                    [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "hot_bed")],
                     formatter=lambda x: f"{x:.0f}",
                 ),
             ],
@@ -193,7 +193,7 @@ class OpenNeptune4ProMapper(OpenNeptune4Mapper):
                 formatter=format_temp,
             ),
             MappingLeaf(
-                [build_accessor(self.map_page(PAGE_PREPARE_TEMP), 17)],
+                [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "nozzle")],
                 formatter=lambda x: f"{x:.0f}",
             ),
         ]
@@ -206,7 +206,7 @@ class OpenNeptune4ProMapper(OpenNeptune4Mapper):
                 formatter=format_temp,
             ),
             MappingLeaf(
-                [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "18")],
+                [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "bed")],
                 formatter=lambda x: f"{x:.0f}",
             ),
         ]
@@ -236,7 +236,7 @@ class OpenNeptune4ProMapper(OpenNeptune4Mapper):
                     formatter=format_temp,
                 ),
                 MappingLeaf(
-                    [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "28")],
+                    [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "hot_bed")],
                     formatter=lambda x: f"{x:.0f}",
                 ),
             ],
