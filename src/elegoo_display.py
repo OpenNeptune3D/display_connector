@@ -57,7 +57,7 @@ class ElegooDisplayMapper(Mapper):
         PAGE_FILES: "file1",
         PAGE_SHUTDOWN_DIALOG: "none_9",
         PAGE_PREPARE_MOVE: "premove",
-        PAGE_PREPARE_TEMP: "pretemp",
+        PAGE_PREPARE_TEMP: "pretemp_2",
         PAGE_PREPARE_EXTRUDER: "prefilament",
         PAGE_SETTINGS: "set",
         PAGE_SETTINGS_LANGUAGE: "language",
