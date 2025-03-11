@@ -28,7 +28,6 @@ class ElegooNeptune4ProMapper(ElegooNeptune4Mapper):
         super().__init__()  # Call the parent class constructor first to initialize attributes
         self.page_mapping[PAGE_PREPARE_TEMP] = "pretemp"
         self.page_mapping[PAGE_PRINTING_FILAMENT] = "adjusttemp_pro"
-        super().__init__()
         self.data_mapping["extruder"]["target"] = [
             MappingLeaf(
                 [
