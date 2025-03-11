@@ -111,7 +111,7 @@ class ElegooDisplayMapper(Mapper):
                 ],
                 "target": [
                     MappingLeaf(
-                        [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "nozzletemp_t")],
+                        [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "nozzle")],
                         formatter=lambda x: f"{x:.0f}",
                     )
                 ],
@@ -136,7 +136,7 @@ class ElegooDisplayMapper(Mapper):
                 ],
                 "target": [
                     MappingLeaf(
-                        [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "bedtemp_t")],
+                        [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "bed")],
                         formatter=lambda x: f"{x:.0f}",
                     )
                 ],
