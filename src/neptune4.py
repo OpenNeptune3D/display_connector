@@ -28,7 +28,6 @@ class ElegooNeptune4ProMapper(ElegooNeptune4Mapper):
         super().__init__()  # Call the parent class constructor first to initialize attributes
         self.page_mapping[PAGE_PREPARE_TEMP] = "pretemp"
         self.page_mapping[PAGE_PRINTING_FILAMENT] = "adjusttemp_pro"
-        super().__init__()
         self.data_mapping["extruder"]["target"] = [
             MappingLeaf(
                 [
@@ -40,7 +39,7 @@ class ElegooNeptune4ProMapper(ElegooNeptune4Mapper):
                 formatter=format_temp,
             ),
             MappingLeaf(
-                [build_accessor(self.map_page(PAGE_PREPARE_TEMP), 17)],
+                [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "nozzle")],
                 formatter=lambda x: f"{x:.0f}",
             ),
         ]
@@ -53,7 +52,7 @@ class ElegooNeptune4ProMapper(ElegooNeptune4Mapper):
                 formatter=format_temp,
             ),
             MappingLeaf(
-                [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "18")],
+                [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "bed")],
                 formatter=lambda x: f"{x:.0f}",
             ),
         ]
@@ -83,7 +82,7 @@ class ElegooNeptune4ProMapper(ElegooNeptune4Mapper):
                     formatter=format_temp,
                 ),
                 MappingLeaf(
-                    [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "28")],
+                    [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "hot_bed")],
                     formatter=lambda x: f"{x:.0f}",
                 ),
             ],
@@ -194,7 +193,7 @@ class OpenNeptune4ProMapper(OpenNeptune4Mapper):
                 formatter=format_temp,
             ),
             MappingLeaf(
-                [build_accessor(self.map_page(PAGE_PREPARE_TEMP), 17)],
+                [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "nozzle")],
                 formatter=lambda x: f"{x:.0f}",
             ),
         ]
@@ -207,7 +206,7 @@ class OpenNeptune4ProMapper(OpenNeptune4Mapper):
                 formatter=format_temp,
             ),
             MappingLeaf(
-                [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "18")],
+                [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "bed")],
                 formatter=lambda x: f"{x:.0f}",
             ),
         ]
@@ -237,7 +236,7 @@ class OpenNeptune4ProMapper(OpenNeptune4Mapper):
                     formatter=format_temp,
                 ),
                 MappingLeaf(
-                    [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "28")],
+                    [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "hot_bed")],
                     formatter=lambda x: f"{x:.0f}",
                 ),
             ],

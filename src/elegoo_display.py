@@ -57,7 +57,7 @@ class ElegooDisplayMapper(Mapper):
         PAGE_FILES: "file1",
         PAGE_SHUTDOWN_DIALOG: "none_9",
         PAGE_PREPARE_MOVE: "premove",
-        PAGE_PREPARE_TEMP: "pretemp",
+        PAGE_PREPARE_TEMP: "pretemp_2",
         PAGE_PREPARE_EXTRUDER: "prefilament",
         PAGE_SETTINGS: "set",
         PAGE_SETTINGS_LANGUAGE: "language",
@@ -111,7 +111,7 @@ class ElegooDisplayMapper(Mapper):
                 ],
                 "target": [
                     MappingLeaf(
-                        [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "nozzletemp_t")],
+                        [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "nozzle")],
                         formatter=lambda x: f"{x:.0f}",
                     )
                 ],
@@ -136,7 +136,7 @@ class ElegooDisplayMapper(Mapper):
                 ],
                 "target": [
                     MappingLeaf(
-                        [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "bedtemp_t")],
+                        [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "bed")],
                         formatter=lambda x: f"{x:.0f}",
                     )
                 ],
