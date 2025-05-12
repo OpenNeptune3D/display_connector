@@ -673,7 +673,7 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
             await self.write(f'xstr {position},0,{color},10665,1,1,1,"{level}"')
 
     async def update_screw_level_description(self, text):
-        await self.write(f'b[3].txt="${text}"')
+        await self.write(f'b[3].txt="{text}"')
 
     async def draw_initial_zprobe_leveling(self, z_probe_step, z_probe_distance):
         await self.write(f'{self.mapper.map_page(PAGE_LEVELING_Z_OFFSET_ADJUST)}.b[19].txt="Z-Probe"')
