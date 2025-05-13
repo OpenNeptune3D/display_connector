@@ -324,7 +324,7 @@ class ElegooDisplayMapper(Mapper):
         }
 
 class ElegooDisplayCommunicator(DisplayCommunicator):
-    supported_firmware_versions = ["1.2.11", "1.2.12", "1.2.13", "1.2.14", "1.2.14.1"]
+    supported_firmware_versions = ["1.2.11", "1.2.12", "1.2.13", "1.2.14", "1.2.14.1", "1.2.16"]
 
     def __init__(self, logger: Logger, model: str, port: str, event_handler, baudrate: int = 115200, timeout: int = 5):
         # Call the base class constructor
