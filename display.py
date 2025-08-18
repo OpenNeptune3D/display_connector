@@ -832,7 +832,7 @@ class DisplayController:
     async def _go_back(self):
         if len(self.history) > 1:
             # 1) If we’re in FILES and can step up a directory, do that first
-            if self._get_current_page() == PAGE_FILES and self.current_dir:
+            if self._get_current_page() == PAGE_FILES and self.current_dir != "":
                 # pop one level
                 self.current_dir = "/".join(self.current_dir.split("/")[:-1])
                 self.files_page = 0
