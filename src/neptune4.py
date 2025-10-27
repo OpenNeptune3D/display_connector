@@ -28,6 +28,17 @@ class ElegooNeptune4ProMapper(ElegooNeptune4Mapper):
         super().__init__()  # Call the parent class constructor first to initialize attributes
         self.page_mapping[PAGE_PREPARE_TEMP] = "pretemp"
         self.page_mapping[PAGE_PRINTING_FILAMENT] = "adjusttemp_pro"
+        self.data_mapping["extruder"]["temperature"] = [
+            MappingLeaf(
+                [
+                    build_accessor(self.map_page(PAGE_PREPARE_TEMP), "nozzletemp"),
+                    build_accessor(
+                        self.map_page(PAGE_PRINTING_FILAMENT), "nozzletemp"
+                    ),
+                ],
+                formatter=format_temp,
+            ),
+        ]
         self.data_mapping["extruder"]["target"] = [
             MappingLeaf(
                 [
@@ -41,6 +52,17 @@ class ElegooNeptune4ProMapper(ElegooNeptune4Mapper):
             MappingLeaf(
                 [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "nozzle")],
                 formatter=lambda x: f"{x:.0f}",
+            ),
+        ]
+        self.data_mapping["heater_bed"]["temperature"] = [
+            MappingLeaf(
+                [
+                    build_accessor(self.map_page(PAGE_PREPARE_TEMP), "bedtemp"),
+                    build_accessor(
+                        self.map_page(PAGE_PRINTING_FILAMENT), "bedtemp"
+                    ),
+                ],
+                formatter=format_temp,
             ),
         ]
         self.data_mapping["heater_bed"]["target"] = [
