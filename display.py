@@ -571,8 +571,7 @@ class DisplayController:
                 self.current_filename = selected["path"]
                 self._loop.create_task(self._navigate_to_page(PAGE_CONFIRM_PRINT))
         elif action == "print_opened_file":
-            self._loop.create_task(self._go_back())
-            self._loop.create_task(self._navigate_to_page(PAGE_OVERLAY_LOADING))
+            self._loop.create_task(self._navigate_to_page(PAGE_OVERLAY_LOADING, clear_history=True))
             self._loop.create_task(
                 self._send_moonraker_request(
                     "printer.print.start", {"filename": self.current_filename}
@@ -890,7 +889,7 @@ class DisplayController:
 
     async def _go_back(self):
         if len(self.history) > 1:
-            # 1) If we’re in FILES and can step up a directory, do that first
+            # 1) If we're in FILES and can step up a directory, do that first
             if self._get_current_page() == PAGE_FILES and self.current_dir != "":
                 # pop one level
                 self.current_dir = "/".join(self.current_dir.split("/")[:-1])
@@ -905,18 +904,19 @@ class DisplayController:
                 self.history.pop()
             back_page = self.history[-1]
 
-            # 3) Navigate and then run any special handling, strictly in sequence
-            if back_page == PAGE_PRINTING:
-                await self.retry_last_thumbnail()
-
+            # 3) Navigate first
             mapped = self.display.mapper.map_page(back_page)
             await self.display.navigate_to(mapped)
             logger.debug(f"Navigating back to {back_page}")
+            
+            # 4) Then handle special page logic AFTER navigation completes
             await self.special_page_handling(back_page)
+            
+            # 5) Finally, retry thumbnail ONLY if we're actually on printing page and thumbnail wasn't displayed
+            if back_page == PAGE_PRINTING and not self._thumbnail_displayed:
+                await self.retry_last_thumbnail()
         else:
             logger.debug("Already at the main page.")
-
-
 
     def start_listening(self):
         self._loop.create_task(self.listen())
