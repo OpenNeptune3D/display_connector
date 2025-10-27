@@ -216,7 +216,7 @@ class DisplayController:
         self._speed_lock = asyncio.Lock()
         self._page_lock = asyncio.Lock() 
 
-        self.REQUEST_TIMEOUT = 30  # seconds
+        self.REQUEST_TIMEOUT = 1200  # seconds 
         self._cleanup_task = None
 
         self._last_thumbnail_request = None
