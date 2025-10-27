@@ -223,6 +223,8 @@ class DisplayController:
         self._thumbnail_retry_lock = asyncio.Lock()
         self._bed_leveling_complete = False
         self._thumbnail_displayed = False  
+        self._thumbnail_task = None 
+
 
     def pathname2url(self, path):
         return quote(path.replace("\\", "/"))
@@ -375,6 +377,12 @@ class DisplayController:
     async def _navigate_to_page(self, page, clear_history=False):
         # 1) Special case: if you want KAMP but aren’t already on a PRINTING page,
         #    first go to PRINTING (respecting clear_history), then fall through to KAMP.
+        if self._thumbnail_task and not self._thumbnail_task.done():
+            self._thumbnail_task.cancel()
+            try:
+                await self._thumbnail_task
+            except asyncio.CancelledError:
+                pass
         if self._get_current_page() == PAGE_PRINTING_KAMP and not self._bed_leveling_complete and page != PAGE_PRINTING:
             logger.info("Preventing navigation during bed leveling")
             return
@@ -888,6 +896,14 @@ class DisplayController:
         return self.display.mapper.map_page(page)
 
     async def _go_back(self):
+        # Cancel any pending thumbnail task when navigating
+        if self._thumbnail_task and not self._thumbnail_task.done():
+            self._thumbnail_task.cancel()
+            try:
+                await self._thumbnail_task
+            except asyncio.CancelledError:
+                pass
+        
         if len(self.history) > 1:
             # 1) If we're in FILES and can step up a directory, do that first
             if self._get_current_page() == PAGE_FILES and self.current_dir != "":
@@ -912,9 +928,21 @@ class DisplayController:
             # 4) Then handle special page logic AFTER navigation completes
             await self.special_page_handling(back_page)
             
-            # 5) Finally, retry thumbnail ONLY if we're actually on printing page and thumbnail wasn't displayed
-            if back_page == PAGE_PRINTING and not self._thumbnail_displayed:
-                await self.retry_last_thumbnail()
+            # 5) Finally, load/retry thumbnail if on printing page
+            if back_page == PAGE_PRINTING and self.current_filename:
+                if not self._thumbnail_displayed and self._last_thumbnail_request:
+                    # Retry last thumbnail
+                    self._thumbnail_task = self._loop.create_task(
+                        self.retry_last_thumbnail()
+                    )
+                elif not self._thumbnail_displayed:
+                    # Load fresh thumbnail
+                    self._thumbnail_task = self._loop.create_task(
+                        self.load_thumbnail_for_page(
+                            self.current_filename,
+                            self._page_id(PAGE_PRINTING)
+                        )
+                    )
         else:
             logger.debug("Already at the main page.")
 
@@ -1204,10 +1232,22 @@ class DisplayController:
 
     async def set_data_prepare_screen(self, filename):
         async with self._filename_lock:
+            # Cancel any pending thumbnail task
+            if self._thumbnail_task and not self._thumbnail_task.done():
+                self._thumbnail_task.cancel()
+                try:
+                    await self._thumbnail_task
+                except asyncio.CancelledError:
+                    pass
+            
             metadata = await self.load_metadata(filename)
             await self.display.set_data_prepare_screen(filename, metadata)
-            await self.load_thumbnail_for_page(
-                filename, self._page_id(PAGE_CONFIRM_PRINT), metadata
+            
+            # Start new thumbnail task and track it
+            self._thumbnail_task = self._loop.create_task(
+                self.load_thumbnail_for_page(
+                    filename, self._page_id(PAGE_CONFIRM_PRINT), metadata
+                )
             )
 
     async def load_metadata(self, filename):
@@ -1226,6 +1266,13 @@ class DisplayController:
             'metadata': metadata
         }
         self._thumbnail_displayed = False
+        
+        # Check if we're still on the correct page before starting
+        current_page_id = self._page_id(self._get_current_page()) if self._get_current_page() else None
+        if current_page_id != page_number:
+            logger.info(f"Page changed before thumbnail load started (expected {page_number}, got {current_page_id})")
+            return
+        
         # Don't try to load thumbnail if we're in bed leveling
         current_page = self._get_current_page()
         if current_page == PAGE_PRINTING_KAMP:
@@ -1252,18 +1299,23 @@ class DisplayController:
                     await self.display.hide_thumbnail()
                     return
                 
-                # Verify we're still on the correct page before displaying
-                current_page = self._get_current_page()
-                if current_page in [PAGE_PRINTING, PAGE_CONFIRM_PRINT]:
-                    logger.info("Displaying the thumbnail")
-                    await self.display.display_thumbnail(page_number, image)
-                    logger.info("Thumbnail displayed successfully")
-                    self._thumbnail_displayed = True
-                else:
-                    logger.info(f"Skipping thumbnail display - wrong page (current: {current_page})")
+                # Double-check we're still on the correct page before displaying
+                current_page_id = self._page_id(self._get_current_page()) if self._get_current_page() else None
+                if current_page_id != page_number:
+                    logger.info(f"Page changed during thumbnail load (expected {page_number}, got {current_page_id}), skipping display")
+                    return
+                
+                logger.info("Displaying the thumbnail")
+                await self.display.display_thumbnail(page_number, image)
+                logger.info("Thumbnail displayed successfully")
+                self._thumbnail_displayed = True
+            except asyncio.CancelledError:
+                logger.info("Thumbnail loading cancelled")
+                raise
             except Exception as e:
                 logger.error(f"Error displaying thumbnail: {e}")
                 # Don't clear _last_thumbnail_request so we can retry later
+
 
     async def retry_last_thumbnail(self):
         """Retry loading the last thumbnail if there was one"""
@@ -1341,7 +1393,6 @@ class DisplayController:
                 except Exception:
                     pass
 
-
     async def handle_status_update(self, new_data, data_mapping=None):
         if data_mapping is None:
             data_mapping = self.display.mapper.data_mapping
@@ -1351,10 +1402,7 @@ class DisplayController:
             if filename:
                 async with self._filename_lock:
                     self.current_filename = filename
-                if self._get_current_page() != PAGE_PRINTING_KAMP:
-                    self._loop.create_task(
-                        self.load_thumbnail_for_page(self.current_filename, self._page_id(PAGE_PRINTING))
-                    )
+                # DON'T load thumbnail here - wait until we're actually on the printing page
 
             state = new_data["print_stats"].get("state")
             if state:
@@ -1366,6 +1414,14 @@ class DisplayController:
                     await self.display.update_printing_state_ui(state)
                     if (current_page is None or current_page not in PRINTING_PAGES) and not self._bed_leveling_complete:
                         await self._navigate_to_page(PAGE_PRINTING, clear_history=True)
+                        # NOW load the thumbnail after navigation is complete
+                        if self.current_filename:
+                            self._thumbnail_task = self._loop.create_task(
+                                self.load_thumbnail_for_page(
+                                    self.current_filename, 
+                                    self._page_id(PAGE_PRINTING)
+                                )
+                            )
                 elif state == "complete":
                     if current_page is None or current_page != PAGE_PRINTING_COMPLETE:
                         await self._navigate_to_page(PAGE_PRINTING_COMPLETE)
@@ -1383,7 +1439,7 @@ class DisplayController:
 
         progress = new_data.get("display_status", {}).get("progress", 0)
         try:
-            if progress > 0.001 and "print_duration" in new_data.get("print_stats", {}):  # Avoid very small values
+            if progress > 0.001 and "print_duration" in new_data.get("print_stats", {}):
                 total_time = self.current_print_duration / progress
                 remaining_time = format_time(total_time - self.current_print_duration)
                 await self.display.update_time_remaining(remaining_time)
