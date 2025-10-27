@@ -31,6 +31,7 @@ class ElegooNeptune4ProMapper(ElegooNeptune4Mapper):
         self.data_mapping["extruder"]["temperature"] = [
             MappingLeaf(
                 [
+                    build_accessor(self.map_page(PAGE_MAIN), "nozzletemp"),
                     build_accessor(self.map_page(PAGE_PREPARE_TEMP), "nozzletemp"),
                     build_accessor(
                         self.map_page(PAGE_PRINTING_FILAMENT), "nozzletemp"
@@ -57,6 +58,7 @@ class ElegooNeptune4ProMapper(ElegooNeptune4Mapper):
         self.data_mapping["heater_bed"]["temperature"] = [
             MappingLeaf(
                 [
+                    build_accessor(self.map_page(PAGE_MAIN), "bedtemp"),
                     build_accessor(self.map_page(PAGE_PREPARE_TEMP), "bedtemp"),
                     build_accessor(
                         self.map_page(PAGE_PRINTING_FILAMENT), "bedtemp"
