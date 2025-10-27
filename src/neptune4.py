@@ -5,7 +5,10 @@ from src.mapping import (
     PAGE_MAIN,
     PAGE_PREPARE_TEMP,
     PAGE_PRINTING_FILAMENT,
+    PAGE_PRINTING,
+    PAGE_PREPARE_EXTRUDER,
     PAGE_SETTINGS_ABOUT,
+    PAGE_PRINTING_KAMP,
     format_temp,
 )
 from src.elegoo_display import ElegooDisplayMapper, ElegooDisplayCommunicator
@@ -33,9 +36,10 @@ class ElegooNeptune4ProMapper(ElegooNeptune4Mapper):
                 [
                     build_accessor(self.map_page(PAGE_MAIN), "nozzletemp"),
                     build_accessor(self.map_page(PAGE_PREPARE_TEMP), "nozzletemp"),
-                    build_accessor(
-                        self.map_page(PAGE_PRINTING_FILAMENT), "nozzletemp"
-                    ),
+                    build_accessor(self.map_page(PAGE_PREPARE_EXTRUDER), "nozzletemp"),
+                    build_accessor(self.map_page(PAGE_PRINTING), "nozzletemp"),
+                    build_accessor(self.map_page(PAGE_PRINTING_KAMP), "nozzletemp"),
+                    build_accessor(self.map_page(PAGE_PRINTING_FILAMENT), "nozzletemp"),
                 ],
                 formatter=format_temp,
             ),
@@ -44,9 +48,7 @@ class ElegooNeptune4ProMapper(ElegooNeptune4Mapper):
             MappingLeaf(
                 [
                     build_accessor(self.map_page(PAGE_PREPARE_TEMP), "nozzletemp_t"),
-                    build_accessor(
-                        self.map_page(PAGE_PRINTING_FILAMENT), "nozzletemp_t"
-                    ),
+                    build_accessor(self.map_page(PAGE_PRINTING_FILAMENT), "nozzletemp_t"),
                 ],
                 formatter=format_temp,
             ),
@@ -60,9 +62,10 @@ class ElegooNeptune4ProMapper(ElegooNeptune4Mapper):
                 [
                     build_accessor(self.map_page(PAGE_MAIN), "bedtemp"),
                     build_accessor(self.map_page(PAGE_PREPARE_TEMP), "bedtemp"),
-                    build_accessor(
-                        self.map_page(PAGE_PRINTING_FILAMENT), "bedtemp"
-                    ),
+                    build_accessor(self.map_page(PAGE_PREPARE_EXTRUDER), "bedtemp"),
+                    build_accessor(self.map_page(PAGE_PRINTING), "bedtemp"),
+                    build_accessor(self.map_page(PAGE_PRINTING_KAMP), "bedtemp"),
+                    build_accessor(self.map_page(PAGE_PRINTING_FILAMENT), "bedtemp"),
                 ],
                 formatter=format_temp,
             ),
@@ -85,10 +88,8 @@ class ElegooNeptune4ProMapper(ElegooNeptune4Mapper):
                 MappingLeaf(
                     [
                         build_accessor(self.map_page(PAGE_MAIN), "out_bedtemp"),
-                        build_accessor(self.map_page(PAGE_PREPARE_TEMP), "out_bedtemp"),
-                        build_accessor(
-                            self.map_page(PAGE_PRINTING_FILAMENT), "out_bedtemp"
-                        ),
+                        build_accessor(self.map_page(PAGE_PREPARE_TEMP), "out_bedtemp"), ##
+                        build_accessor(self.map_page(PAGE_PRINTING_FILAMENT), "out_bedtemp"), ##
                     ],
                     formatter=format_temp,
                 )
@@ -96,12 +97,8 @@ class ElegooNeptune4ProMapper(ElegooNeptune4Mapper):
             "target": [
                 MappingLeaf(
                     [
-                        build_accessor(
-                            self.map_page(PAGE_PREPARE_TEMP), "out_bedtemp_t"
-                        ),
-                        build_accessor(
-                            self.map_page(PAGE_PRINTING_FILAMENT), "out_bedtemp_t"
-                        ),
+                        build_accessor(self.map_page(PAGE_PREPARE_TEMP), "out_bedtemp_t"), 
+                        build_accessor(self.map_page(PAGE_PRINTING_FILAMENT), "out_bedtemp_t"),
                     ],
                     formatter=format_temp,
                 ),
