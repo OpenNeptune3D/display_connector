@@ -375,31 +375,42 @@ class DisplayController:
         self.send_gcode(f"G91\nG1 {axis}{distance} F{int(speed) * 60}\nG90")
 
     async def _navigate_to_page(self, page, clear_history=False):
-        # 1) Special case: if you want KAMP but aren’t already on a PRINTING page,
-        #    first go to PRINTING (respecting clear_history), then fall through to KAMP.
+        # Cancel any pending thumbnail task when navigating
         if self._thumbnail_task and not self._thumbnail_task.done():
             self._thumbnail_task.cancel()
             try:
                 await self._thumbnail_task
             except asyncio.CancelledError:
                 pass
+        
+        # 1) Special case: if you want KAMP but aren't already on a PRINTING page,
+        #    first go to PRINTING (respecting clear_history), then fall through to KAMP.
         if self._get_current_page() == PAGE_PRINTING_KAMP and not self._bed_leveling_complete and page != PAGE_PRINTING:
             logger.info("Preventing navigation during bed leveling")
             return
+        
         if page == PAGE_PRINTING_KAMP and (not self.history or self.history[-1] not in PRINTING_PAGES):
             # navigate to PRINTING first
             if clear_history:
                 self.history.clear()
             self.history.append(PAGE_PRINTING)
             mapped_printing = self.display.mapper.map_page(PAGE_PRINTING)
+            
+            # Add small delay to allow display to settle
             await self.display.navigate_to(mapped_printing)
+            await asyncio.sleep(0.1)  # Small delay for display to be ready
+            
             logger.debug(f"Navigating to {PAGE_PRINTING}")
             # run any printing-page special logic (if any)
-            await self.special_page_handling(PAGE_PRINTING)
-            pass
-            # now proceed to the real target: KAMP
+            try:
+                await self.special_page_handling(PAGE_PRINTING)
+            except Exception as e:
+                logger.error(f"Error in special page handling for PRINTING: {e}")
+            
+            # Add another small delay before navigating to KAMP
+            await asyncio.sleep(0.1)
         
-        # 2) The normal navigation path (skips if you’re already on `page`)
+        # 2) The normal navigation path (skips if you're already on `page`)
         if not self.history or self.history[-1] != page:
             # Handle page navigation within tabbed pages
             if page in TABBED_PAGES and self.history and self.history[-1] in TABBED_PAGES:
@@ -416,7 +427,10 @@ class DisplayController:
             logger.debug(f"Navigating to {page}")
 
             # finally, invoke per-page overlays or fallback
-            await self.special_page_handling(page)
+            try:
+                await self.special_page_handling(page)
+            except Exception as e:
+                logger.error(f"Error in special page handling for {page}: {e}")
 
     def execute_action(self, action):
         if action.startswith("move_"):
@@ -1401,8 +1415,9 @@ class DisplayController:
             filename = new_data["print_stats"].get("filename")
             if filename:
                 async with self._filename_lock:
+                    # Always update current filename and clear the displayed flag
                     self.current_filename = filename
-                # DON'T load thumbnail here - wait until we're actually on the printing page
+                    self._thumbnail_displayed = False  # Reset when filename changes
 
             state = new_data["print_stats"].get("state")
             if state:
@@ -1413,8 +1428,10 @@ class DisplayController:
                 if state in ["printing", "paused"]:
                     await self.display.update_printing_state_ui(state)
                     if (current_page is None or current_page not in PRINTING_PAGES) and not self._bed_leveling_complete:
+                        # First navigate to printing page
                         await self._navigate_to_page(PAGE_PRINTING, clear_history=True)
-                        # NOW load the thumbnail after navigation is complete
+                        
+                        # Start loading thumbnail immediately (don't wait for it)
                         if self.current_filename:
                             self._thumbnail_task = self._loop.create_task(
                                 self.load_thumbnail_for_page(
@@ -1422,6 +1439,19 @@ class DisplayController:
                                     self._page_id(PAGE_PRINTING)
                                 )
                             )
+                    elif current_page in PRINTING_PAGES:
+                        # Already on a printing page, ensure thumbnail is loaded for current file
+                        if self.current_filename and not self._thumbnail_displayed:
+                            # Check if the thumbnail request is for a different file
+                            if (not self._last_thumbnail_request or 
+                                self._last_thumbnail_request.get('filename') != self.current_filename):
+                                logger.info(f"File changed, loading new thumbnail for {self.current_filename}")
+                                self._thumbnail_task = self._loop.create_task(
+                                    self.load_thumbnail_for_page(
+                                        self.current_filename,
+                                        self._page_id(PAGE_PRINTING)
+                                    )
+                                )
                 elif state == "complete":
                     if current_page is None or current_page != PAGE_PRINTING_COMPLETE:
                         await self._navigate_to_page(PAGE_PRINTING_COMPLETE)
