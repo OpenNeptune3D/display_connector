@@ -301,7 +301,7 @@ class DisplayController:
             logger.error("File not found")
         except Exception as e:
             logger.error(f"Error reading file: {e}")
-        return None
+        return MODEL_N4_REGULAR  # Default if nothing found
 
     async def special_page_handling(self, current_page):
         if current_page == PAGE_FILES:
