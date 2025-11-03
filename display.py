@@ -1519,6 +1519,10 @@ class DisplayController:
     async def handle_status_update(self, new_data, data_mapping=None):
         if data_mapping is None:
             data_mapping = self.display.mapper.data_mapping
+        # Ensure page is ready before updating (prevents race condition)
+        current_page = self._get_current_page()
+        if current_page == PAGE_MAIN:
+            await asyncio.sleep(0.1)
 
         if "print_stats" in new_data:
             filename = new_data["print_stats"].get("filename")
