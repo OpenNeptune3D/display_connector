@@ -225,6 +225,11 @@ class DisplayController:
         self._thumbnail_displayed = False  
         self._thumbnail_task = None 
 
+        self._is_reconnecting = False
+        self._listen_task = None
+        self._is_listening = False
+        self._process_stream_task = None
+
 
     def pathname2url(self, path):
         return quote(path.replace("\\", "/"))
@@ -961,42 +966,98 @@ class DisplayController:
             logger.debug("Already at the main page.")
 
     def start_listening(self):
-        self._loop.create_task(self.listen())
+        # Don't start if already listening
+        if self._is_listening and self._listen_task and not self._listen_task.done():
+            logger.debug("Listen task already running, skipping...")
+            return
+        
+        self._is_listening = True
+        self._listen_task = self._loop.create_task(self.listen())
 
     async def listen(self):
-        await self.display.connect()
-        await self.display.check_valid_version()
-        await self.connect_moonraker()
-        ret = await self._send_moonraker_request(
-            "printer.objects.subscribe",
-            {
-                "objects": {
-                    "gcode_move": ["extrude_factor", "speed_factor", "homing_origin"],
-                    "motion_report": ["live_position", "live_velocity"],
-                    "fan": ["speed"],
-                    "heater_bed": ["temperature", "target"],
-                    "extruder": ["temperature", "target"],
-                    "heater_generic heater_bed_outer": ["temperature", "target"],
-                    "display_status": ["progress"],
-                    "print_stats": [
-                        "state",
-                        "print_duration",
-                        "filename",
-                        "total_duration",
-                        "info",
-                    ],
-                    "output_pin Part_Light": ["value"],
-                    "output_pin Frame_Light": ["value"],
-                    "configfile": ["config"],
-                    f"filament_switch_sensor {self.filament_sensor_name}": ["enabled"],
-                }
-            },
-        )
-        data = ret["result"]["status"]
-        logger.info("Display Type: " + str(self.display.get_display_type_name()))
-        logger.info("Printer Model: " + str(self.display.get_device_name()))
-        await self.display.initialize_display()
-        await self.handle_status_update(data)
+        logger.info("Starting listen task")
+        try:
+            self._is_listening = True
+            
+            # Connect to display
+            try:
+                await self.display.connect()
+                await self.display.check_valid_version()
+            except Exception as e:
+                logger.error(f"Failed to connect to display: {e}")
+                raise
+            
+            # Connect to Moonraker
+            try:
+                await self.connect_moonraker()
+            except Exception as e:
+                logger.error(f"Failed to connect to Moonraker: {e}")
+                raise
+            
+            # Subscribe to printer objects
+            try:
+                ret = await self._send_moonraker_request(
+                    "printer.objects.subscribe",
+                    {
+                        "objects": {
+                            "gcode_move": ["extrude_factor", "speed_factor", "homing_origin"],
+                            "motion_report": ["live_position", "live_velocity"],
+                            "fan": ["speed"],
+                            "heater_bed": ["temperature", "target"],
+                            "extruder": ["temperature", "target"],
+                            "heater_generic heater_bed_outer": ["temperature", "target"],
+                            "display_status": ["progress"],
+                            "print_stats": [
+                                "state",
+                                "print_duration",
+                                "filename",
+                                "total_duration",
+                                "info",
+                            ],
+                            "output_pin Part_Light": ["value"],
+                            "output_pin Frame_Light": ["value"],
+                            "configfile": ["config"],
+                            f"filament_switch_sensor {self.filament_sensor_name}": ["enabled"],
+                        }
+                    },
+                )
+                
+                # Safely extract data with error handling
+                if "result" in ret and "status" in ret["result"]:
+                    data = ret["result"]["status"]
+                    logger.info("Display Type: " + str(self.display.get_display_type_name()))
+                    logger.info("Printer Model: " + str(self.display.get_device_name()))
+                    await self.display.initialize_display()
+                    await self.handle_status_update(data)
+                else:
+                    logger.error(f"Unexpected response format from printer.objects.subscribe: {ret}")
+                    raise Exception("Failed to subscribe to printer objects")
+                
+                # Now wait for the process_stream task to complete (keeps connection alive)
+                logger.info("Listen task now monitoring connection...")
+                if self._process_stream_task:
+                    await self._process_stream_task
+                    logger.info("Process stream task completed, connection closed")
+                else:
+                    logger.warning("No process_stream task found!")
+                    
+            except Exception as e:
+                logger.error(f"Error in subscription or stream processing: {e}")
+                raise
+                
+        except asyncio.CancelledError:
+            logger.info("Listen task cancelled")
+            raise
+        except Exception as e:
+            logger.error(f"Error in listen(): {e}")
+            logger.error(traceback.format_exc())
+            # Trigger reconnection after a delay
+            await asyncio.sleep(2)
+            self._is_listening = False
+            await self._attempt_reconnect()
+        finally:
+            self._is_listening = False
+            logger.debug("Listen task exiting, _is_listening flag cleared")
 
     async def _cleanup_stale_requests(self):
         """Periodically clean up stale requests"""
@@ -1063,7 +1124,7 @@ class DisplayController:
                     sockpath, limit=SOCKET_LIMIT
                 )
                 self.writer = writer
-                self._loop.create_task(self._process_stream(reader))
+                self._process_stream_task = self._loop.create_task(self._process_stream(reader))
                 self.connected = True
                 logger.info("Connected to Moonraker")
 
@@ -1080,7 +1141,7 @@ class DisplayController:
                     # Process the software_version...
                     logger.info(f"Software Version: {software_version}")
                     await self.display.update_klipper_version_ui(software_version)
-                    break
+                    break  # Exit the connection retry loop
 
                 except KeyError:
                     logger.error(
@@ -1096,23 +1157,50 @@ class DisplayController:
                 await asyncio.sleep(5)  # Wait before reconnecting
                 continue
 
-        ret = await self._send_moonraker_request(
-            "server.connection.identify",
-            {
-                "client_name": "OpenNept4une Display Connector",
-                "version": "0.0.1",
-                "type": "other",
-                "url": "https://github.com/halfbearman/opennept4une",
-            },
-        )
-        logger.debug(
-            f"Client Identified With Moonraker: {ret['result']['connection_id']}"
-        )
+        # Now identify with Moonraker - wrapped in try/except
+        try:
+            ret = await self._send_moonraker_request(
+                "server.connection.identify",
+                {
+                    "client_name": "OpenNept4une Display Connector",
+                    "version": "0.0.1",
+                    "type": "other",
+                    "url": "https://github.com/halfbearman/opennept4une",
+                },
+            )
+            
+            # Check for error response
+            if "error" in ret:
+                error_code = ret["error"].get("code")
+                error_msg = ret["error"].get("message", "Unknown error")
+                
+                # Error 400 "already identified" is acceptable - just log and continue
+                if error_code == 400 and "already identified" in error_msg.lower():
+                    logger.warning(f"Connection already identified: {error_msg}")
+                    # Continue execution - don't return or raise
+                else:
+                    # Other errors are logged but don't crash - we're already connected
+                    logger.error(f"Failed to identify with Moonraker: {error_msg}")
+                    # Don't raise - we can still function without identification
+            elif "result" in ret:
+                logger.debug(
+                    f"Client Identified With Moonraker: {ret['result']['connection_id']}"
+                )
+        except Exception as e:
+            logger.error(f"Exception during Moonraker identification: {e}")
+            # Don't crash - we're already connected and can function
 
-        system = (await self._send_moonraker_request("machine.system_info"))["result"][
-            "system_info"
-        ]
-        self.display.ips = ", ".join(self._find_ips(system["network"]))
+        # Get system info - also wrapped for safety
+        try:
+            system_response = await self._send_moonraker_request("machine.system_info")
+            if "result" in system_response:
+                system = system_response["result"]["system_info"]
+                self.display.ips = ", ".join(self._find_ips(system["network"]))
+            else:
+                logger.warning("Could not retrieve system info")
+        except Exception as e:
+            logger.error(f"Error getting system info: {e}")
+            # Continue anyway - not critical
 
     def _make_rpc_msg(self, method: str, **kwargs):
         msg = {"jsonrpc": "2.0", "method": method}
@@ -1201,7 +1289,6 @@ class DisplayController:
             elif item["method"] == "notify_gcode_response":
                 self.handle_gcode_response(item["params"][0])
         logger.info("Unix Socket Disconnection from _process_stream()")
-        await self.close()
 
     def handle_machine_config_change(self, new_data):
         def safe_int_convert(value, default=0):
@@ -1235,9 +1322,31 @@ class DisplayController:
                     self.bed_leveling_counts = self.full_bed_leveling_counts
 
     async def _attempt_reconnect(self):
-        logger.info("Attempting to reconnect to Moonraker...")
-        await asyncio.sleep(1)  # A delay before attempting to reconnect
-        self.start_listening()
+        if self._is_reconnecting:
+            logger.debug("Reconnection already in progress, skipping...")
+            return
+        
+        self._is_reconnecting = True
+        try:
+            # Close existing connection
+            if self.writer and not self.writer.is_closing():
+                try:
+                    self.writer.close()
+                    await self.writer.wait_closed()
+                except Exception as e:
+                    logger.debug(f"Error closing writer: {e}")
+            
+            self.connected = False
+            
+            logger.info("Attempting to reconnect to Moonraker...")
+            await asyncio.sleep(1)
+            
+            # Clear the listening flag if it's stuck
+            self._is_listening = False
+            
+            self.start_listening()
+        finally:
+            self._is_reconnecting = False
 
     def _get_current_page(self):
         if len(self.history) > 0:
@@ -1410,6 +1519,10 @@ class DisplayController:
     async def handle_status_update(self, new_data, data_mapping=None):
         if data_mapping is None:
             data_mapping = self.display.mapper.data_mapping
+        # Ensure page is ready before updating (prevents race condition)
+        current_page = self._get_current_page()
+        if current_page == PAGE_MAIN:
+            await asyncio.sleep(0.1)
 
         if "print_stats" in new_data:
             filename = new_data["print_stats"].get("filename")
@@ -1566,13 +1679,20 @@ class DisplayController:
         if not self.connected:
             return
         self.connected = False
-        self.writer.close()
-        await self.writer.wait_closed()
-        await self.resources.cleanup()
-
+        
+        # Cancel the process_stream task if it's still running
+        if self._process_stream_task and not self._process_stream_task.done():
+            self._process_stream_task.cancel()
+            try:
+                await self._process_stream_task
+            except asyncio.CancelledError:
+                pass
+        
         if self.writer:
             self.writer.close()
             await self.writer.wait_closed()
+        
+        await self.resources.cleanup()
 
     async def handle_screw_leveling(self):
         self.leveling_mode = "screw"

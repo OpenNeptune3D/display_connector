@@ -44,17 +44,30 @@ cat <<EOF | sudo tee $SERVICE_FILE > /dev/null
 Description=OpenNept4une TouchScreen Display Service
 After=klipper.service klipper-mcu.service moonraker.service
 Wants=klipper.service moonraker.service
-Documentation=man:display(8)
+Documentation=https://github.com/OpenNeptune3D/display_connector
 
 [Service]
+Type=simple
 ExecStartPre=/bin/sleep 10
 ExecStart=/home/mks/display_connector/venv/bin/python /home/mks/display_connector/display.py
 WorkingDirectory=/home/mks/display_connector
 Restart=on-failure
 RestartSec=10
 User=mks
+Group=mks
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening
 ProtectSystem=full
 PrivateTmp=true
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+
+# Resource limits (optional but recommended)
+LimitNOFILE=4096
+MemoryMax=256M
 
 [Install]
 WantedBy=multi-user.target
