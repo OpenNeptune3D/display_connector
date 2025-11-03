@@ -1,6 +1,7 @@
 import asyncio
 from logging import Logger
 from src.tjc import TJCClient
+from nextion.exceptions import CommandFailed
 
 class DisplayCommunicator:
     def __init__(
@@ -50,9 +51,13 @@ class DisplayCommunicator:
 
         try:
             await self.display.command(data, timeout if timeout is not None else self.timeout)
+        except CommandFailed as e:
+            # This is expected when components don't exist on the current page
+            # For example, trying to update printing page components while on KAMP page
+            self.logger.debug(f"Display command failed (component may not exist on current page): {e}")
         except Exception as e:
-            self.logger.error(f"Failed to write to display: {str(e)}")
-            raise
+            # Other errors should still be logged but not crash
+            self.logger.warning(f"Unexpected error writing to display: {e}")
         finally:
             # If this was a blocking operation, unblock afterwards
             if blocked_key:
@@ -91,7 +96,11 @@ class DisplayCommunicator:
             if not current_data:
                 self.current_data = new_data
         
-        await self._update_data_recursive(new_data, data_mapping, current_data)
+        try:
+            await self._update_data_recursive(new_data, data_mapping, current_data)
+        except Exception as e:
+            # Don't let display update failures crash the entire update loop
+            self.logger.debug(f"Error updating display data: {e}")
 
     async def _update_data_recursive(self, new_data, data_mapping, current_data):
         is_dict = isinstance(new_data, dict)
@@ -109,15 +118,19 @@ class DisplayCommunicator:
 
     async def _update_data_leaf(self, value, mapping_value):
         for mapping_leaf in mapping_value:
-            formatted = await self._format_value(mapping_leaf, value)
-            for mapped_key in mapping_leaf.fields:
-                command = (
-                    f'{mapped_key}.{mapping_leaf.field_type}="{formatted}"'
-                    if mapping_leaf.field_type == "txt"
-                    else f"{mapped_key}.{mapping_leaf.field_type}={formatted}"
-                )
-                await self.write(command)
-                await asyncio.sleep(0.05)  # Small delay to ensure each command is processed
+            try:
+                formatted = await self._format_value(mapping_leaf, value)
+                for mapped_key in mapping_leaf.fields:
+                    command = (
+                        f'{mapped_key}.{mapping_leaf.field_type}="{formatted}"'
+                        if mapping_leaf.field_type == "txt"
+                        else f"{mapped_key}.{mapping_leaf.field_type}={formatted}"
+                    )
+                    await self.write(command)
+                    await asyncio.sleep(0.05)  # Small delay to ensure each command is processed
+            except Exception as e:
+                # Log but continue processing other mappings
+                self.logger.debug(f"Failed to update display leaf: {e}")
 
     async def _format_value(self, mapping_leaf, value):
         if not mapping_leaf.required_fields:
