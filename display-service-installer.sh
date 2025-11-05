@@ -48,15 +48,41 @@ Documentation=https://github.com/OpenNeptune3D/display_connector
 
 [Service]
 Type=simple
-ExecStartPre=/bin/sleep 10
-ExecStart=/home/mks/display_connector/venv/bin/python /home/mks/display_connector/display.py
-WorkingDirectory=/home/mks/display_connector
-Restart=on-failure
-RestartSec=10
 User=mks
 Group=mks
-StandardOutput=journal
-StandardError=journal
+WorkingDirectory=/home/mks/display_connector
+ExecStartPre=/bin/sleep 10
+ExecStart=/home/mks/display_connector/venv/bin/python /home/mks/display_connector/display.py
+
+# Restart configuration
+Restart=on-failure
+RestartSec=10
+StartLimitBurst=5
+StartLimitIntervalSec=300
+
+# Timeouts
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+# Memory limits - 256M max, throttle at 200M
+MemoryMax=256M
+MemoryHigh=200M
+MemorySwapMax=128M
+
+# CPU limits - 25% of one core maximum
+CPUQuota=25%
+CPUWeight=50
+Nice=5
+
+# I/O priority
+IOSchedulingClass=2
+IOSchedulingPriority=4
+
+# Task/thread limits
+TasksMax=200
+
+# File descriptor limits
+LimitNOFILE=1024
 
 # Security hardening
 ProtectSystem=full
@@ -65,9 +91,9 @@ NoNewPrivileges=true
 ProtectKernelTunables=true
 ProtectControlGroups=true
 
-# Resource limits (optional but recommended)
-LimitNOFILE=4096
-MemoryMax=256M
+# Logging
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
