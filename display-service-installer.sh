@@ -70,7 +70,7 @@ MemoryHigh=200M
 MemorySwapMax=128M
 
 # CPU limits - 25% of one core maximum
-CPUQuota=25%
+CPUQuota=35%
 CPUWeight=50
 Nice=5
 
