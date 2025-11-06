@@ -58,7 +58,6 @@ ExecStart=/home/mks/display_connector/venv/bin/python /home/mks/display_connecto
 Restart=on-failure
 RestartSec=10
 StartLimitBurst=5
-StartLimitIntervalSec=300
 
 # Timeouts
 TimeoutStartSec=60
