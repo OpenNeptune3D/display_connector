@@ -123,15 +123,45 @@ def get_communicator(display, model) -> DisplayCommunicator:
 SOCKET_LIMIT = 20 * 1024 * 1024
 
 class ResourceManager:
+    """Manages thread pool resources for CPU-bound operations like thumbnail parsing"""
+    
     def __init__(self):
+        # Dedicated pool for CPU-bound or blocking work
         self._thread_pool = ThreadPoolExecutor(max_workers=2)
+        self._shutdown = False
     
     def get_thread_pool(self):
+        """Get the thread pool for executing blocking operations
+        
+        Returns None if shutdown has been initiated to prevent new task submissions.
+        """
+        if self._shutdown:
+            logger.warning("Thread pool requested after shutdown - returning None")
+            return None
         return self._thread_pool
     
     async def cleanup(self):
-        if self._thread_pool:
-            self._thread_pool.shutdown(wait=True)
+        """Cleanup thread pool resources - safe to call multiple times
+        
+        Uses non-blocking shutdown with task cancellation to prevent hangs from
+        stuck thumbnail parsing operations.
+        """
+        # Make it safe to call multiple times
+        if self._shutdown or not self._thread_pool:
+            return
+        
+        self._shutdown = True
+        tp = self._thread_pool
+        self._thread_pool = None  # Prevent reuse during shutdown
+        
+        try:
+            # Non-blocking shutdown with task cancellation
+            # This prevents hangs from long-running parse_thumbnail() calls
+            tp.shutdown(wait=False, cancel_futures=True)
+            logger.info("Thread pool shutdown initiated (non-blocking)")
+        except Exception as e:
+            logger.warning(f"Exception during thread pool shutdown: {e}")
+
 
 class DisplayController:
     last_config_change = 0
