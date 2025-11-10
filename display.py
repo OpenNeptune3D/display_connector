@@ -1066,7 +1066,6 @@ class DisplayController:
                 # Now wait for the process_stream task to complete (keeps connection alive)
                 logger.info("Listen task now monitoring connection...")
                 if self._process_stream_task:
-                    await self._process_stream_task
                     logger.info("Process stream task completed, connection closed")
                 else:
                     logger.warning("No process_stream task found!")
@@ -1319,6 +1318,7 @@ class DisplayController:
             elif item["method"] == "notify_gcode_response":
                 self.handle_gcode_response(item["params"][0])
         logger.info("Unix Socket Disconnection from _process_stream()")
+        await self.close()
 
     def handle_machine_config_change(self, new_data):
         def safe_int_convert(value, default=0):
