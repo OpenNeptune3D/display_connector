@@ -1548,7 +1548,7 @@ class DisplayController:
             
             logger.info(f"Fetching thumbnail image from {url}")
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=5) as resp:
+                async with session.get(url, timeout=10) as resp:
                     if resp.status != 200:
                         raise aiohttp.ClientError(f"Failed to fetch thumbnail, status code: {resp.status}")
                     img_data = await resp.read()
