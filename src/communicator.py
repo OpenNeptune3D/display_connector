@@ -86,7 +86,7 @@ class DisplayCommunicator:
 
     async def navigate_to(self, page_id):
         await self.write(f"page {page_id}")
-        await asyncio.sleep(0.5)  # Small delay to ensure the page change is processed
+        await asyncio.sleep(0.25)  # Small delay to ensure the page change is processed
 
     async def update_data(self, new_data, data_mapping=None, current_data=None):
         if data_mapping is None:
