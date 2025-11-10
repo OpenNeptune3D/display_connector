@@ -232,7 +232,6 @@ class DisplayController:
         self._thumbnail_thread_pool = self.resources.get_thread_pool()
 
         self._speed_lock = asyncio.Lock()
-        self._page_lock = asyncio.Lock() 
 
         self.REQUEST_TIMEOUT = 1200  # seconds 
         self._cleanup_task = None
@@ -250,6 +249,8 @@ class DisplayController:
 
         self._history_lock = asyncio.Lock()
         self._reconnect_lock = asyncio.Lock()
+
+        self._files_lock = asyncio.Lock()
 
 
     def pathname2url(self, path):
@@ -314,35 +315,42 @@ class DisplayController:
                 )
 
     def get_printer_model(self):
-        # Return cached value if already fetched
         if self._cached_printer_model is not None:
             return self._cached_printer_model
         
         # Check config first
-        if "general" in self.config:
-            if "printer_model" in self.config["general"]:
-                self._cached_printer_model = self.config["general"]["printer_model"]
-                return self._cached_printer_model
+        try:
+            if "general" in self.config:
+                if "printer_model" in self.config["general"]:
+                    self._cached_printer_model = self.config["general"]["printer_model"]
+                    return self._cached_printer_model
+        except Exception as e:
+            logger.warning(f"Error reading printer model from config: {e}")
         
         # Read from file
         try:
             with open("/boot/.OpenNept4une.txt", "r") as file:
                 for line in file:
-                    if line.startswith(tuple(SUPPORTED_PRINTERS)):
-                        model_part = line.split("-")[0].strip()
-                        self._cached_printer_model = model_part
-                        return self._cached_printer_model
+                    try:
+                        if line.startswith(tuple(SUPPORTED_PRINTERS)):
+                            model_part = line.split("-")[0].strip()
+                            self._cached_printer_model = model_part
+                            return self._cached_printer_model
+                    except Exception as e:
+                        logger.warning(f"Error parsing line '{line}': {e}")
+                        continue
         except FileNotFoundError:
-            logger.error("File not found")
+            logger.error("Printer model file not found at /boot/.OpenNept4une.txt")
         except Exception as e:
-            logger.error(f"Error reading file: {e}")
+            logger.error(f"Error reading printer model file: {e}")
         
         # Default
+        logger.info(f"Using default printer model: {MODEL_N4_REGULAR}")
         self._cached_printer_model = MODEL_N4_REGULAR
         return self._cached_printer_model
 
     async def special_page_handling(self, current_page):
-        #Handle special page setup. Called after navigation completes.
+        """Handle special page setup. Called after navigation completes."""
         if current_page == PAGE_FILES:
             await self.display.show_files_page(
                 self.current_dir, self.dir_contents, self.files_page
@@ -422,6 +430,8 @@ class DisplayController:
         self.send_gcode(f"G91\nG1 {axis}{distance} F{int(speed) * 60}\nG90")
 
     async def _navigate_to_page(self, page, clear_history=False):
+        """Navigate to a page without holding locks during I/O operations."""
+        
         # Cancel any pending thumbnail task when navigating (outside lock)
         if self._thumbnail_task and not self._thumbnail_task.done():
             self._thumbnail_task.cancel()
@@ -430,7 +440,7 @@ class DisplayController:
             except asyncio.CancelledError:
                 pass
         
-        # PHASE 1: Check bed leveling block (under lock)
+        # PHASE 1: Check bed leveling block (under lock - DATA ONLY)
         async with self._history_lock:
             current_page = self.history[-1] if self.history else None
             
@@ -447,20 +457,20 @@ class DisplayController:
             )
         
         if need_printing_first:
-            # Modify history under lock
+            # Modify history under lock (DATA ONLY)
             async with self._history_lock:
                 if clear_history:
                     self.history.clear()
                 self.history.append(PAGE_PRINTING)
+                mapped_printing = self.display.mapper.map_page(PAGE_PRINTING)
             
-            # Navigate (outside lock)
-            mapped_printing = self.display.mapper.map_page(PAGE_PRINTING)
+            # Navigate (outside lock - I/O)
             await self.display.navigate_to(mapped_printing)
             await asyncio.sleep(0.1)  # Small delay for display to be ready
             
             logger.debug(f"Navigating to {PAGE_PRINTING}")
             
-            # Run special page handling (outside lock)
+            # Run special page handling (outside lock - I/O)
             try:
                 await self.special_page_handling(PAGE_PRINTING)
             except Exception as e:
@@ -469,7 +479,10 @@ class DisplayController:
             await asyncio.sleep(0.1)  # Another small delay before navigating to KAMP
         
         # PHASE 3: Normal navigation path
-        # Decision phase (under lock)
+        # Decision phase (under lock - DATA ONLY)
+        should_navigate = False
+        mapped_page = None
+        
         async with self._history_lock:
             current_page = self.history[-1] if self.history else None
             
@@ -483,13 +496,11 @@ class DisplayController:
                     self.history.append(page)
                 
                 should_navigate = True
-            else:
-                should_navigate = False
+                mapped_page = self.display.mapper.map_page(page)
         
-        # Action phase (outside lock)
+        # Action phase (outside lock - I/O)
         if should_navigate:
-            mapped = self.display.mapper.map_page(page)
-            await self.display.navigate_to(mapped)
+            await self.display.navigate_to(mapped_page)
             logger.debug(f"Navigating to {page}")
 
             # Invoke per-page overlays or fallback
@@ -635,36 +646,49 @@ class DisplayController:
         elif action.startswith("files_page_"):
             parts = action.split("_")
             direction = parts[2]
-            self.files_page = int(
-                max(
-                    0,
-                    min(
-                        (len(self.dir_contents) / 5),
-                        self.files_page + (1 if direction == "next" else -1),
-                    ),
-                )
-            )
-            self._loop.create_task(
-            self.display.show_files_page(self.current_dir, self.dir_contents, self.files_page)
-            )
+            async def _change_files_page():
+                async with self._files_lock:
+                    self.files_page = int(
+                        max(
+                            0,
+                            min(
+                                (len(self.dir_contents) / 5),
+                                self.files_page + (1 if direction == "next" else -1),
+                            ),
+                        )
+                    )
+                await self.display.show_files_page(
+                    self.current_dir, self.dir_contents, self.files_page
+                )   
+            self._loop.create_task(_change_files_page())
         elif action.startswith("open_file_"):
             parts = action.split("_")
             index = int(parts[2])
-            selected = self.dir_contents[(self.files_page * 5) + index]
-            if selected["type"] == "dir":
-                self.current_dir = selected["path"]
-                self.files_page = 0
-                self._loop.create_task(self._load_files())
-            else:
-                self.current_filename = selected["path"]
-                self._loop.create_task(self._navigate_to_page(PAGE_CONFIRM_PRINT))
+            async def _handle_file_selection():
+                async with self._files_lock:
+                    selected = self.dir_contents[(self.files_page * 5) + index]
+                    is_dir = selected["type"] == "dir"
+                    file_path = selected["path"]
+                if is_dir:
+                    self.current_dir = file_path
+                    self.files_page = 0
+                    await self._load_files()
+                else:
+                    async with self._filename_lock:
+                        self.current_filename = file_path
+                    await self._navigate_to_page(PAGE_CONFIRM_PRINT)
+            self._loop.create_task(_handle_file_selection())
         elif action == "print_opened_file":
-            self._loop.create_task(self._navigate_to_page(PAGE_OVERLAY_LOADING, clear_history=True))
-            self._loop.create_task(
-                self._send_moonraker_request(
-                    "printer.print.start", {"filename": self.current_filename}
+            # Create async task that safely reads filename under lock
+            async def _navigate_and_print():
+                await self._navigate_to_page(PAGE_OVERLAY_LOADING, clear_history=True)
+                async with self._filename_lock:
+                    filename_to_print = self.current_filename
+                await self._send_moonraker_request(
+                    "printer.print.start", {"filename": filename_to_print}
                 )
-            )
+            
+            self._loop.create_task(_navigate_and_print())
         elif action == "confirm_complete":
             logger.info("Clearing SD Card")
             self.send_gcode("SDCARD_RESET_FILE")
@@ -705,16 +729,18 @@ class DisplayController:
                 self.display.update_prepare_extrude_ui(self.extrude_amount, self.extrude_speed)
             )
         elif action.startswith("extrude_"):
-            if self.current_state != "printing":  # Check if the state is not 'printing'
-                parts = action.split("_")
-                direction = parts[1]
-                loadtype = "LOAD" if direction == "+" else "UNLOAD"
-                # Send GCODE commands in sequence:
-                gcode_sequence = f"""
-                {loadtype}_FILAMENT
-                """
-                # Send the full GCODE sequence
-                self._loop.create_task(self.send_gcodes_async(gcode_sequence.strip().split('\n')))
+            async def _handle_extrude():
+                async with self._filename_lock:  # Reuse existing lock or create _state_lock
+                    is_not_printing = (self.current_state != "printing")
+                
+                if is_not_printing:
+                    parts = action.split("_")
+                    direction = parts[1]
+                    loadtype = "LOAD" if direction == "+" else "UNLOAD"
+                    gcode_sequence = f"{loadtype}_FILAMENT"
+                    await self.send_gcodes_async(gcode_sequence.strip().split('\n'))
+            
+            self._loop.create_task(_handle_extrude())
         elif action.startswith("start_temp_preset_"):
             material = action.split("_")[3]
             self.temperature_preset_material = material
@@ -852,56 +878,57 @@ class DisplayController:
         self._loop.create_task(self._go_back())
 
     async def send_speed_update(self, speed_type, new_speed):
-        async with self._speed_lock:
-            try:
-                if new_speed != 1.0:
-                    if speed_type == "print":
-                        await self._send_moonraker_request(
-                            "printer.gcode.script",
-                            {"script": f"M220 S{new_speed:.0f}"}
-                        )
-                        self.printing_target_speeds["print"] = new_speed
-                    elif speed_type == "flow":
-                        await self._send_moonraker_request(
-                            "printer.gcode.script",
-                            {"script": f"M221 S{new_speed:.0f}"}
-                        )
-                        self.printing_target_speeds["flow"] = new_speed
-                    elif speed_type == "fan":
-                        value = min(max(((new_speed) / 100) * 255, 0), 255)
-                        await self._send_moonraker_request(
-                            "printer.gcode.script",
-                            {"script": f"M106 S{value}"}
-                        )
-                        self.printing_target_speeds["fan"] = new_speed
-                else:
-                    if speed_type == "print":
-                        await self._send_moonraker_request(
-                            "printer.gcode.script",
-                            {"script": "M220 S100"}
-                        )
-                        self.printing_target_speeds["print"] = 1.0
-                    elif speed_type == "flow":
-                        await self._send_moonraker_request(
-                            "printer.gcode.script",
-                            {"script": "M221 S100"}
-                        )
-                        self.printing_target_speeds["flow"] = 1.0
-                    elif speed_type == "fan":
-                        await self._send_moonraker_request(
-                            "printer.gcode.script",
-                            {"script": "M106 S0"}
-                        )
-                        self.printing_target_speeds["fan"] = 0.0
-                
-                # Update UI after successful gcode execution
-                await self.display.update_printing_speed_settings_ui(
-                    self.printing_selected_speed_type,
-                    self.printing_target_speeds[self.printing_selected_speed_type]
+        """Update speed/flow/fan without holding lock during I/O."""
+        
+        # PHASE 1: Prepare gcode command (no lock needed)
+        gcode_script = None
+        new_target_value = None
+        
+        if new_speed != 1.0:
+            if speed_type == "print":
+                gcode_script = f"M220 S{new_speed:.0f}"
+                new_target_value = new_speed
+            elif speed_type == "flow":
+                gcode_script = f"M221 S{new_speed:.0f}"
+                new_target_value = new_speed
+            elif speed_type == "fan":
+                value = min(max(((new_speed) / 100) * 255, 0), 255)
+                gcode_script = f"M106 S{value}"
+                new_target_value = new_speed
+        else:
+            if speed_type == "print":
+                gcode_script = "M220 S100"
+                new_target_value = 1.0
+            elif speed_type == "flow":
+                gcode_script = "M221 S100"
+                new_target_value = 1.0
+            elif speed_type == "fan":
+                gcode_script = "M106 S0"
+                new_target_value = 0.0
+        
+        try:
+            # PHASE 2: Send gcode (outside lock - NETWORK I/O)
+            if gcode_script:
+                await self._send_moonraker_request(
+                    "printer.gcode.script",
+                    {"script": gcode_script}
                 )
-            except Exception as e:
-                logger.error(f"Error updating speed: {e}")
-                raise
+            
+            # PHASE 3: Update state (under lock - DATA ONLY)
+            async with self._speed_lock:
+                if new_target_value is not None:
+                    self.printing_target_speeds[speed_type] = new_target_value
+                ui_speed_type = self.printing_selected_speed_type
+                ui_speed_value = self.printing_target_speeds[self.printing_selected_speed_type]
+            
+            # PHASE 4: Update UI (outside lock - DISPLAY I/O)
+            await self.display.update_printing_speed_settings_ui(
+                ui_speed_type,
+                ui_speed_value
+            )
+        except Exception as e:
+            logger.error(f"Error updating speed: {e}")
+            raise
 
     def _toggle_fan(self, state):
         gcode = f"M106 S{'255' if state else '0'}"
@@ -996,23 +1023,25 @@ class DisplayController:
                 await self._load_files()
                 return
 
-            # Pop pages under lock
+            # Pop pages and get mapped page under lock
+            back_page = None
+            mapped_page = None
             async with self._history_lock:
                 if len(self.history) > 1:
                     self.history.pop()
                     while len(self.history) > 1 and self.history[-1] in TRANSITION_PAGES:
                         self.history.pop()
                     back_page = self.history[-1] if len(self.history) > 0 else None
-                else:
-                    back_page = None
+                    # Do mapper lookup under lock (it's fast - just dict access)
+                    if back_page:
+                        mapped_page = self.display.mapper.map_page(back_page)
             
-            if back_page is None:
+            if back_page is None or mapped_page is None:
                 logger.debug("Already at the main page.")
                 return
 
-            # Navigate (outside lock)
-            mapped = self.display.mapper.map_page(back_page)
-            await self.display.navigate_to(mapped)
+            # Navigate (outside lock - I/O)
+            await self.display.navigate_to(mapped_page)
             logger.debug(f"Navigating back to {back_page}")
             
             await self.special_page_handling(back_page)
@@ -1444,22 +1473,36 @@ class DisplayController:
             return None
 
     async def set_data_prepare_screen(self, filename):
+        """Set prepare screen data without holding lock during I/O."""
+        
+        # PHASE 1: Cancel existing task and store filename (under lock - DATA ONLY)
+        task_to_cancel = None
         async with self._filename_lock:
-            # Cancel any pending thumbnail task
+            # Get reference to task to cancel
             if self._thumbnail_task and not self._thumbnail_task.done():
-                self._thumbnail_task.cancel()
-                try:
-                    await self._thumbnail_task
-                except asyncio.CancelledError:
-                    pass
+                task_to_cancel = self._thumbnail_task
+                self._thumbnail_task = None
             
-            metadata = await self.load_metadata(filename)
-            await self.display.set_data_prepare_screen(filename, metadata)
-            
-            # Start new thumbnail task and track it
+            # Store filename
+            current_filename = filename
+        
+        # PHASE 2: Cancel task if needed (outside lock - ASYNC OPERATION)
+        if task_to_cancel:
+            task_to_cancel.cancel()
+            try:
+                await task_to_cancel
+            except asyncio.CancelledError:
+                pass
+        
+        # PHASE 3: Load metadata and update display (outside lock - NETWORK + DISPLAY I/O)
+        metadata = await self.load_metadata(current_filename)
+        await self.display.set_data_prepare_screen(current_filename, metadata)
+        
+        # PHASE 4: Create new thumbnail task (under lock - DATA ONLY)
+        async with self._filename_lock:
             self._thumbnail_task = self._loop.create_task(
                 self.load_thumbnail_for_page(
-                    filename, self._page_id(PAGE_CONFIRM_PRINT), metadata
+                    current_filename, self._page_id(PAGE_CONFIRM_PRINT), metadata
                 )
             )
 
@@ -1566,8 +1609,10 @@ class DisplayController:
             url = f"{self.config.safe_get('general', 'moonraker_url', 'http://localhost:7125')}/server/files/gcodes/{self.pathname2url(path)}"
             
             logger.info(f"Fetching thumbnail image from {url}")
+            
+            # PHASE 1: Fetch image with timeout
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=5) as resp:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
                     if resp.status != 200:
                         raise aiohttp.ClientError(f"Failed to fetch thumbnail, status code: {resp.status}")
                     img_data = await resp.read()
@@ -1584,19 +1629,30 @@ class DisplayController:
             
             logger.info("Starting thumbnail parsing")
             loop = asyncio.get_running_loop()
-            # Use class-level thread pool
-            image = await loop.run_in_executor(
-                self._thumbnail_thread_pool,  # Add as class attribute
-                parse_thumbnail,
-                thumbnail,
-                160,
-                160,
-                background
-            )
+            
+            # PHASE 2: Parse image with timeout (10 seconds max)
+            try:
+                image = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        self._thumbnail_thread_pool,
+                        parse_thumbnail,
+                        thumbnail,
+                        160,
+                        160,
+                        background
+                    ),
+                    timeout=10.0  # Timeout added!
+                )
+            except asyncio.TimeoutError:
+                logger.error(f"Thumbnail parsing timed out after 10 seconds for {path}")
+                return None
             
             logger.info("Thumbnail parsing completed")
             return image
             
+        except asyncio.TimeoutError:
+            logger.error(f"Thumbnail fetch timed out for {path}")
+            return None
         except Exception as e:
             logger.error(f"Error in thumbnail processing: {e}")
             return None
@@ -1611,7 +1667,7 @@ class DisplayController:
         if data_mapping is None:
             data_mapping = self.display.mapper.data_mapping
         
-        #  RATE LIMITING: Only check page max once per second
+        # RATE LIMITING: Only check page max once per second
         import time
         if not hasattr(self, '_last_page_check_time'):
             self._last_page_check_time = 0
@@ -1642,7 +1698,10 @@ class DisplayController:
             should_load_thumbnail = False
             thumbnail_filename = None
             thumbnail_page_id = None
+            state_to_process = None
+            needs_state_ui_update = False
             
+            # PHASE 1: Read/update data under lock (DATA ONLY)
             async with self._filename_lock:
                 filename = new_data["print_stats"].get("filename")
                 if filename:
@@ -1652,14 +1711,20 @@ class DisplayController:
                     if filename_changed:
                         self._thumbnail_displayed = False
                         logger.info(f"Filename changed to: {filename}")
+                
+                # FIX: If filename wasn't in this update but we have it stored, add it back
+                # This ensures the mapping system always has the filename to display
+                elif self.current_filename:
+                    new_data["print_stats"]["filename"] = self.current_filename
 
                 state = new_data["print_stats"].get("state")
                 if state:
                     self.current_state = state
                     logger.info(f"Status Update: {state}")
+                    state_to_process = state
                     
                     if state in ["printing", "paused"]:
-                        await self.display.update_printing_state_ui(state)
+                        needs_state_ui_update = True
                         
                         if (current_page is None or current_page not in PRINTING_PAGES) and not self._bed_leveling_complete:
                             pass  # Will navigate below
@@ -1682,29 +1747,37 @@ class DisplayController:
                             current_page == PAGE_PRINTING_COMPLETE or 
                             current_page == PAGE_OVERLAY_LOADING):
                             pass  # Will navigate below
+            
+            # PHASE 2: Update UI if needed (outside lock - DISPLAY I/O)
+            if needs_state_ui_update:
+                await self.display.update_printing_state_ui(state_to_process)
 
-            # Handle navigation and thumbnail loading OUTSIDE the lock
-            state = new_data["print_stats"].get("state")
-            if state:
+            # PHASE 3: Handle navigation and thumbnail loading (outside lock - I/O)
+            if state_to_process:
                 # On state change, re-check page to be safe
                 if has_state_change:
                     current_page = await self._get_current_page()
                     self._cached_page = current_page
                 
-                if state in ["printing", "paused"]:
+                if state_to_process in ["printing", "paused"]:
+                    # Navigate if not on a printing page
                     if (current_page is None or current_page not in PRINTING_PAGES) and not self._bed_leveling_complete:
+                        # Reset thumbnail flag BEFORE navigation
+                        self._thumbnail_displayed = False
+                        
                         await self._navigate_to_page(PAGE_PRINTING, clear_history=True)
-                        # Invalidate cache after navigation
                         self._cached_page = None
                         
+                        # After navigation, prepare thumbnail load
                         async with self._filename_lock:
-                            if self.current_filename and not self._thumbnail_displayed:
+                            if self.current_filename:
                                 should_load_thumbnail = True
                                 thumbnail_filename = self.current_filename
                                 thumbnail_page_id = self._page_id(PAGE_PRINTING)
                     
+                    # Load thumbnail if needed
                     if should_load_thumbnail and thumbnail_filename:
-                        logger.info(f"Loading thumbnail for {thumbnail_filename}")
+                        logger.info(f"Loading thumbnail for {thumbnail_filename} on printing page")
                         if self._thumbnail_task and not self._thumbnail_task.done():
                             self._thumbnail_task.cancel()
                             try:
@@ -1719,10 +1792,10 @@ class DisplayController:
                             )
                         )
                         
-                elif state == "complete":
+                elif state_to_process == "complete":
                     if current_page is None or current_page != PAGE_PRINTING_COMPLETE:
                         await self._navigate_to_page(PAGE_PRINTING_COMPLETE)
-                        self._cached_page = None  # Invalidate cache
+                        self._cached_page = None
                         
                 else:
                     if (current_page is None or 
@@ -1730,7 +1803,7 @@ class DisplayController:
                         current_page == PAGE_PRINTING_COMPLETE or 
                         current_page == PAGE_OVERLAY_LOADING):
                         await self._navigate_to_page(PAGE_MAIN, clear_history=True)
-                        self._cached_page = None  # Invalidate cache
+                        self._cached_page = None
 
         if "print_duration" in new_data.get("print_stats", {}):
             self.current_print_duration = new_data["print_stats"]["print_duration"]
@@ -1986,15 +2059,23 @@ try:
 
     # called when the config file changes
     def handle_wd_callback(notifier):
-        controller.handle_config_change()
+        try:
+            controller.handle_config_change()
+        except Exception as e:
+            logger.error(f"Error handling config file change: {e}")
+            logger.error(traceback.format_exc())
 
     # called when the klipper/moonraker socket appears
     def handle_sock_changes(notifier):
-        if notifier.event_type == "created":
-            logger.info(
-                f"{notifier.src_path.split('/')[-1]} created. Attempting to reconnect..."
-            )
-            controller.klipper_restart_event.set()
+        try:
+            if notifier.event_type == "created":
+                logger.info(
+                    f"{notifier.src_path.split('/')[-1]} created. Attempting to reconnect..."
+                )
+                controller.klipper_restart_event.set()
+        except Exception as e:
+            logger.error(f"Error handling socket change: {e}")
+            logger.error(traceback.format_exc())
 
     # watch the config file
     config_patterns = ["display_connector.cfg"]
