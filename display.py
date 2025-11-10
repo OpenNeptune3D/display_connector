@@ -123,40 +123,26 @@ def get_communicator(display, model) -> DisplayCommunicator:
 SOCKET_LIMIT = 20 * 1024 * 1024
 
 class ResourceManager:
-    """Manages thread pool resources for CPU-bound operations like thumbnail parsing"""
     
     def __init__(self):
-        # Dedicated pool for CPU-bound or blocking work
         self._thread_pool = ThreadPoolExecutor(max_workers=2)
         self._shutdown = False
     
     def get_thread_pool(self):
-        """Get the thread pool for executing blocking operations
-        
-        Returns None if shutdown has been initiated to prevent new task submissions.
-        """
         if self._shutdown:
             logger.warning("Thread pool requested after shutdown - returning None")
             return None
         return self._thread_pool
     
     async def cleanup(self):
-        """Cleanup thread pool resources - safe to call multiple times
-        
-        Uses non-blocking shutdown with task cancellation to prevent hangs from
-        stuck thumbnail parsing operations.
-        """
-        # Make it safe to call multiple times
         if self._shutdown or not self._thread_pool:
             return
         
         self._shutdown = True
         tp = self._thread_pool
-        self._thread_pool = None  # Prevent reuse during shutdown
+        self._thread_pool = None 
         
         try:
-            # Non-blocking shutdown with task cancellation
-            # This prevents hangs from long-running parse_thumbnail() calls
             tp.shutdown(wait=False, cancel_futures=True)
             logger.info("Thread pool shutdown initiated (non-blocking)")
         except Exception as e:
@@ -184,7 +170,6 @@ class DisplayController:
         )
         self._handle_display_config()
 
-        # Initialize lock for current_filename
         self._filename_lock = asyncio.Lock()
         self.current_filename = None
 
@@ -259,6 +244,9 @@ class DisplayController:
         self._listen_task = None
         self._is_listening = False
         self._process_stream_task = None
+
+        self._history_lock = asyncio.Lock()
+        self._reconnect_lock = asyncio.Lock()
 
 
     def pathname2url(self, path):
@@ -339,6 +327,7 @@ class DisplayController:
         return MODEL_N4_REGULAR  # Default if nothing found
 
     async def special_page_handling(self, current_page):
+        #Handle special page setup. Called after navigation completes.
         if current_page == PAGE_FILES:
             await self.display.show_files_page(
                 self.current_dir, self.dir_contents, self.files_page
@@ -356,7 +345,15 @@ class DisplayController:
                 self.temperature_preset_bed,
             )
         elif current_page == PAGE_CONFIRM_PRINT:
-            self._loop.create_task(self.set_data_prepare_screen(self.current_filename))
+            # Safely get filename under lock
+            async with self._filename_lock:
+                filename = self.current_filename
+            
+            if filename:
+                self._loop.create_task(self.set_data_prepare_screen(filename))
+            else:
+                logger.warning("PAGE_CONFIRM_PRINT reached but no filename set")
+                
         elif current_page == PAGE_PRINTING_FILAMENT:
             await self.display.update_printing_heater_settings_ui(
                 self.printing_selected_heater,
@@ -410,7 +407,7 @@ class DisplayController:
         self.send_gcode(f"G91\nG1 {axis}{distance} F{int(speed) * 60}\nG90")
 
     async def _navigate_to_page(self, page, clear_history=False):
-        # Cancel any pending thumbnail task when navigating
+        # Cancel any pending thumbnail task when navigating (outside lock)
         if self._thumbnail_task and not self._thumbnail_task.done():
             self._thumbnail_task.cancel()
             try:
@@ -418,50 +415,69 @@ class DisplayController:
             except asyncio.CancelledError:
                 pass
         
-        # 1) Special case: if you want KAMP but aren't already on a PRINTING page,
-        #    first go to PRINTING (respecting clear_history), then fall through to KAMP.
-        if self._get_current_page() == PAGE_PRINTING_KAMP and not self._bed_leveling_complete and page != PAGE_PRINTING:
-            logger.info("Preventing navigation during bed leveling")
-            return
-        
-        if page == PAGE_PRINTING_KAMP and (not self.history or self.history[-1] not in PRINTING_PAGES):
-            # navigate to PRINTING first
-            if clear_history:
-                self.history.clear()
-            self.history.append(PAGE_PRINTING)
-            mapped_printing = self.display.mapper.map_page(PAGE_PRINTING)
+        # PHASE 1: Check bed leveling block (under lock)
+        async with self._history_lock:
+            current_page = self.history[-1] if self.history else None
             
-            # Add small delay to allow display to settle
+            if current_page == PAGE_PRINTING_KAMP and not self._bed_leveling_complete and page != PAGE_PRINTING:
+                logger.info("Preventing navigation during bed leveling")
+                return
+        
+        # PHASE 2: Handle KAMP special case (navigate to PRINTING first if needed)
+        async with self._history_lock:
+            current_page = self.history[-1] if self.history else None
+            need_printing_first = (
+                page == PAGE_PRINTING_KAMP and 
+                (not self.history or current_page not in PRINTING_PAGES)
+            )
+        
+        if need_printing_first:
+            # Modify history under lock
+            async with self._history_lock:
+                if clear_history:
+                    self.history.clear()
+                self.history.append(PAGE_PRINTING)
+            
+            # Navigate (outside lock)
+            mapped_printing = self.display.mapper.map_page(PAGE_PRINTING)
             await self.display.navigate_to(mapped_printing)
             await asyncio.sleep(0.1)  # Small delay for display to be ready
             
             logger.debug(f"Navigating to {PAGE_PRINTING}")
-            # run any printing-page special logic (if any)
+            
+            # Run special page handling (outside lock)
             try:
                 await self.special_page_handling(PAGE_PRINTING)
             except Exception as e:
                 logger.error(f"Error in special page handling for PRINTING: {e}")
             
-            # Add another small delay before navigating to KAMP
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.1)  # Another small delay before navigating to KAMP
         
-        # 2) The normal navigation path (skips if you're already on `page`)
-        if not self.history or self.history[-1] != page:
-            # Handle page navigation within tabbed pages
-            if page in TABBED_PAGES and self.history and self.history[-1] in TABBED_PAGES:
-                self.history[-1] = page
+        # PHASE 3: Normal navigation path
+        # Decision phase (under lock)
+        async with self._history_lock:
+            current_page = self.history[-1] if self.history else None
+            
+            if not self.history or current_page != page:
+                # Decide what to do with history
+                if page in TABBED_PAGES and self.history and current_page in TABBED_PAGES:
+                    self.history[-1] = page
+                else:
+                    if clear_history and page != PAGE_PRINTING_KAMP:
+                        self.history.clear()
+                    self.history.append(page)
+                
+                should_navigate = True
             else:
-                if clear_history and page != PAGE_PRINTING_KAMP:
-                    # only clear history here if it wasn't already the printing step above
-                    self.history.clear()
-                self.history.append(page)
-
-            # map & navigate
+                should_navigate = False
+        
+        # Action phase (outside lock)
+        if should_navigate:
             mapped = self.display.mapper.map_page(page)
             await self.display.navigate_to(mapped)
             logger.debug(f"Navigating to {page}")
 
-            # finally, invoke per-page overlays or fallback
+            # Invoke per-page overlays or fallback
             try:
                 await self.special_page_handling(page)
             except Exception as e:
@@ -953,45 +969,59 @@ class DisplayController:
             except asyncio.CancelledError:
                 pass
         
-        if len(self.history) > 1:
-            # 1) If we're in FILES and can step up a directory, do that first
-            if self._get_current_page() == PAGE_FILES and self.current_dir != "":
-                # pop one level
+        async with self._history_lock:
+            history_len = len(self.history)
+        
+        if history_len > 1:
+            # Check if we're in FILES and can step up a directory
+            current_page = await self._get_current_page()  
+            if current_page == PAGE_FILES and self.current_dir != "":
                 self.current_dir = "/".join(self.current_dir.split("/")[:-1])
                 self.files_page = 0
-                # await the reload completely before returning
                 await self._load_files()
                 return
 
-            # 2) Otherwise pop any transition pages and step back
-            self.history.pop()
-            while len(self.history) > 1 and self.history[-1] in TRANSITION_PAGES:
-                self.history.pop()
-            back_page = self.history[-1]
+            # Pop pages under lock
+            async with self._history_lock:
+                if len(self.history) > 1:
+                    self.history.pop()
+                    while len(self.history) > 1 and self.history[-1] in TRANSITION_PAGES:
+                        self.history.pop()
+                    back_page = self.history[-1] if len(self.history) > 0 else None
+                else:
+                    back_page = None
+            
+            if back_page is None:
+                logger.debug("Already at the main page.")
+                return
 
-            # 3) Navigate first
+            # Navigate (outside lock)
             mapped = self.display.mapper.map_page(back_page)
             await self.display.navigate_to(mapped)
             logger.debug(f"Navigating back to {back_page}")
             
-            # 4) Then handle special page logic AFTER navigation completes
             await self.special_page_handling(back_page)
             
-            # 5) Finally, load/retry thumbnail if on printing page
-            if back_page == PAGE_PRINTING and self.current_filename:
-                if not self._thumbnail_displayed and self._last_thumbnail_request:
-                    # Retry last thumbnail
-                    self._thumbnail_task = self._loop.create_task(
-                        self.retry_last_thumbnail()
-                    )
-                elif not self._thumbnail_displayed:
-                    # Load fresh thumbnail
-                    self._thumbnail_task = self._loop.create_task(
-                        self.load_thumbnail_for_page(
-                            self.current_filename,
-                            self._page_id(PAGE_PRINTING)
+            # Load/retry thumbnail if on printing page
+            if back_page == PAGE_PRINTING:
+                async with self._filename_lock:
+                    has_filename = self.current_filename is not None
+                    has_last_request = self._last_thumbnail_request is not None
+                    is_displayed = self._thumbnail_displayed
+                    filename = self.current_filename
+                
+                if has_filename and not is_displayed:
+                    if has_last_request:
+                        self._thumbnail_task = self._loop.create_task(
+                            self.retry_last_thumbnail()
                         )
-                    )
+                    else:
+                        self._thumbnail_task = self._loop.create_task(
+                            self.load_thumbnail_for_page(
+                                filename,
+                                self._page_id(PAGE_PRINTING)
+                            )
+                        )
         else:
             logger.debug("Already at the main page.")
 
@@ -1089,7 +1119,7 @@ class DisplayController:
             logger.debug("Listen task exiting, _is_listening flag cleared")
 
     async def _cleanup_stale_requests(self):
-        """Periodically clean up stale requests"""
+        #Periodically clean up stale requests
         while True:
             try:
                 current_time = time.time()
@@ -1259,9 +1289,10 @@ class DisplayController:
                 return
         logger.info(f"Unhandled Input: {page} {component} {value}")
 
-    def handle_custom_touch(self, x, y):
-        if self._get_current_page() in custom_touch_actions:
-            actions = custom_touch_actions[self._get_current_page()]
+    async def handle_custom_touch(self, x, y):
+        current_page = await self._get_current_page()  
+        if current_page in custom_touch_actions:
+            actions = custom_touch_actions[current_page]
             for key in actions:
                 min_x, min_y, max_x, max_y = key
                 if min_x < x and x < max_x and min_y < y and y < max_y:
@@ -1273,14 +1304,15 @@ class DisplayController:
             self.handle_response(data.page_id, data.component_id)
         elif type == EventType.TOUCH_COORDINATE:
             if data.touch_event == 0:
-                self.handle_custom_touch(data.x, data.y)
+                await self.handle_custom_touch(data.x, data.y)
         elif type == EventType.SLIDER_INPUT:
             self.handle_input(data.page_id, data.component_id, data.value)
         elif type == EventType.NUMERIC_INPUT:
             self.handle_input(data.page_id, data.component_id, data.value)
         elif type == EventType.RECONNECTED:
             logger.info("Reconnected to Display")
-            self.history = []
+            async with self._history_lock:
+                self.history = []
             await self.display.initialize_display()
             await self._navigate_to_page(PAGE_MAIN, clear_history=True)
         else:
@@ -1316,7 +1348,7 @@ class DisplayController:
             elif item["method"] == "notify_status_update":
                 await self.handle_status_update(item["params"][0])
             elif item["method"] == "notify_gcode_response":
-                self.handle_gcode_response(item["params"][0])
+                await self.handle_gcode_response(item["params"][0])  
         logger.info("Unix Socket Disconnection from _process_stream()")
         await self.close()
 
@@ -1352,36 +1384,45 @@ class DisplayController:
                     self.bed_leveling_counts = self.full_bed_leveling_counts
 
     async def _attempt_reconnect(self):
-        if self._is_reconnecting:
-            logger.debug("Reconnection already in progress, skipping...")
-            return
-        
-        self._is_reconnecting = True
-        try:
-            # Close existing connection
-            if self.writer and not self.writer.is_closing():
-                try:
-                    self.writer.close()
-                    await self.writer.wait_closed()
-                except Exception as e:
-                    logger.debug(f"Error closing writer: {e}")
-            
-            self.connected = False
-            
-            logger.info("Attempting to reconnect to Moonraker...")
-            await asyncio.sleep(1)
-            
-            # Clear the listening flag if it's stuck
-            self._is_listening = False
-            
-            self.start_listening()
-        finally:
-            self._is_reconnecting = False
+        async with self._reconnect_lock:
+            if self._is_reconnecting:
+                logger.debug("Reconnection already in progress, skipping...")
+                return
+            self._is_reconnecting = True
+            try:
+                # Close existing connection
+                if self.writer and not self.writer.is_closing():
+                    try:
+                        self.writer.close()
+                        await self.writer.wait_closed()
+                    except Exception as e:
+                        logger.debug(f"Error closing writer: {e}")
+                
+                self.connected = False
+                
+                logger.info("Attempting to reconnect to Moonraker...")
+                await asyncio.sleep(1)
+                
+                # Clear the listening flag if it's stuck
+                self._is_listening = False
+                
+                self.start_listening()
+            finally:
+                self._is_reconnecting = False
 
-    def _get_current_page(self):
-        if len(self.history) > 0:
-            return self.history[-1]
-        return None
+    async def _get_current_page(self):
+        #Get current page with timeout protection
+        try:
+            async with asyncio.timeout(2.0):
+                async with self._history_lock:
+                    if len(self.history) > 0:
+                        return self.history[-1]
+                    return None
+        except asyncio.TimeoutError:
+            logger.error("DEADLOCK DETECTED in _get_current_page() - lock timeout after 2s")
+            import traceback
+            logger.error("Stack trace:\n" + "".join(traceback.format_stack()))
+            return None
 
     async def set_data_prepare_screen(self, filename):
         async with self._filename_lock:
@@ -1421,13 +1462,14 @@ class DisplayController:
         self._thumbnail_displayed = False
         
         # Check if we're still on the correct page before starting
-        current_page_id = self._page_id(self._get_current_page()) if self._get_current_page() else None
+        current_page = await self._get_current_page()  
+        current_page_id = self._page_id(current_page) if current_page else None
+        
         if current_page_id != page_number:
             logger.info(f"Page changed before thumbnail load started (expected {page_number}, got {current_page_id})")
             return
         
         # Don't try to load thumbnail if we're in bed leveling
-        current_page = self._get_current_page()
         if current_page == PAGE_PRINTING_KAMP:
             logger.info("Deferring thumbnail load during bed leveling")
             return
@@ -1438,9 +1480,9 @@ class DisplayController:
         best_thumbnail = self.find_best_thumbnail(metadata)
         if not best_thumbnail:
             logger.warning(f"No suitable thumbnail found for {filename}")
-            async with self._page_lock:
-                if self._get_current_page() == page_number:
-                    await self.display.hide_thumbnail()
+            current_page = await self._get_current_page()  
+            if current_page and self._page_id(current_page) == page_number:
+                await self.display.hide_thumbnail()
             return
 
         path = self.construct_thumbnail_path(filename, best_thumbnail["relative_path"])
@@ -1453,7 +1495,9 @@ class DisplayController:
                     return
                 
                 # Double-check we're still on the correct page before displaying
-                current_page_id = self._page_id(self._get_current_page()) if self._get_current_page() else None
+                current_page = await self._get_current_page()  
+                current_page_id = self._page_id(current_page) if current_page else None
+                
                 if current_page_id != page_number:
                     logger.info(f"Page changed during thumbnail load (expected {page_number}, got {current_page_id}), skipping display")
                     return
@@ -1467,11 +1511,9 @@ class DisplayController:
                 raise
             except Exception as e:
                 logger.error(f"Error displaying thumbnail: {e}")
-                # Don't clear _last_thumbnail_request so we can retry later
-
 
     async def retry_last_thumbnail(self):
-        """Retry loading the last thumbnail if there was one"""
+        #Retry loading the last thumbnail if there was one
         if self._last_thumbnail_request:
             async with self._thumbnail_retry_lock:
                 try:
@@ -1549,63 +1591,127 @@ class DisplayController:
     async def handle_status_update(self, new_data, data_mapping=None):
         if data_mapping is None:
             data_mapping = self.display.mapper.data_mapping
-        # Ensure page is ready before updating (prevents race condition)
-        current_page = self._get_current_page()
+        
+        #  RATE LIMITING: Only check page max once per second
+        import time
+        if not hasattr(self, '_last_page_check_time'):
+            self._last_page_check_time = 0
+            self._cached_page = None
+        
+        now = time.time()
+        time_since_last_check = now - self._last_page_check_time
+        
+        # Determine if we need to check the page
+        has_state_change = (
+            "print_stats" in new_data and 
+            new_data["print_stats"].get("state") is not None
+        )
+        
+        # Check page if: state changed OR >1 second elapsed
+        if has_state_change or time_since_last_check > 1.0:
+            current_page = await self._get_current_page()
+            self._cached_page = current_page
+            self._last_page_check_time = now
+        else:
+            # Use cached value
+            current_page = self._cached_page
+        
         if current_page == PAGE_MAIN:
             await asyncio.sleep(0.1)
 
         if "print_stats" in new_data:
-            filename = new_data["print_stats"].get("filename")
-            if filename:
-                async with self._filename_lock:
-                    # Always update current filename and clear the displayed flag
+            should_load_thumbnail = False
+            thumbnail_filename = None
+            thumbnail_page_id = None
+            
+            async with self._filename_lock:
+                filename = new_data["print_stats"].get("filename")
+                if filename:
+                    filename_changed = (self.current_filename != filename)
                     self.current_filename = filename
-                    self._thumbnail_displayed = False  # Reset when filename changes
+                    
+                    if filename_changed:
+                        self._thumbnail_displayed = False
+                        logger.info(f"Filename changed to: {filename}")
 
+                state = new_data["print_stats"].get("state")
+                if state:
+                    self.current_state = state
+                    logger.info(f"Status Update: {state}")
+                    
+                    if state in ["printing", "paused"]:
+                        await self.display.update_printing_state_ui(state)
+                        
+                        if (current_page is None or current_page not in PRINTING_PAGES) and not self._bed_leveling_complete:
+                            pass  # Will navigate below
+                            
+                        elif current_page in PRINTING_PAGES:
+                            if self.current_filename and not self._thumbnail_displayed:
+                                if (not self._last_thumbnail_request or 
+                                    self._last_thumbnail_request.get('filename') != self.current_filename):
+                                    should_load_thumbnail = True
+                                    thumbnail_filename = self.current_filename
+                                    thumbnail_page_id = self._page_id(PAGE_PRINTING)
+                                    
+                    elif state == "complete":
+                        if current_page is None or current_page != PAGE_PRINTING_COMPLETE:
+                            pass  # Will navigate below
+                            
+                    else:
+                        if (current_page is None or 
+                            current_page in PRINTING_PAGES or 
+                            current_page == PAGE_PRINTING_COMPLETE or 
+                            current_page == PAGE_OVERLAY_LOADING):
+                            pass  # Will navigate below
+
+            # Handle navigation and thumbnail loading OUTSIDE the lock
             state = new_data["print_stats"].get("state")
             if state:
-                self.current_state = state
-                logger.info(f"Status Update: {state}")
-                current_page = self._get_current_page()
-
+                # On state change, re-check page to be safe
+                if has_state_change:
+                    current_page = await self._get_current_page()
+                    self._cached_page = current_page
+                
                 if state in ["printing", "paused"]:
-                    await self.display.update_printing_state_ui(state)
                     if (current_page is None or current_page not in PRINTING_PAGES) and not self._bed_leveling_complete:
-                        # First navigate to printing page
                         await self._navigate_to_page(PAGE_PRINTING, clear_history=True)
+                        # Invalidate cache after navigation
+                        self._cached_page = None
                         
-                        # Start loading thumbnail immediately (don't wait for it)
-                        if self.current_filename:
-                            self._thumbnail_task = self._loop.create_task(
-                                self.load_thumbnail_for_page(
-                                    self.current_filename, 
-                                    self._page_id(PAGE_PRINTING)
-                                )
+                        async with self._filename_lock:
+                            if self.current_filename and not self._thumbnail_displayed:
+                                should_load_thumbnail = True
+                                thumbnail_filename = self.current_filename
+                                thumbnail_page_id = self._page_id(PAGE_PRINTING)
+                    
+                    if should_load_thumbnail and thumbnail_filename:
+                        logger.info(f"Loading thumbnail for {thumbnail_filename}")
+                        if self._thumbnail_task and not self._thumbnail_task.done():
+                            self._thumbnail_task.cancel()
+                            try:
+                                await self._thumbnail_task
+                            except asyncio.CancelledError:
+                                pass
+                        
+                        self._thumbnail_task = self._loop.create_task(
+                            self.load_thumbnail_for_page(
+                                thumbnail_filename,
+                                thumbnail_page_id
                             )
-                    elif current_page in PRINTING_PAGES:
-                        # Already on a printing page, ensure thumbnail is loaded for current file
-                        if self.current_filename and not self._thumbnail_displayed:
-                            # Check if the thumbnail request is for a different file
-                            if (not self._last_thumbnail_request or 
-                                self._last_thumbnail_request.get('filename') != self.current_filename):
-                                logger.info(f"File changed, loading new thumbnail for {self.current_filename}")
-                                self._thumbnail_task = self._loop.create_task(
-                                    self.load_thumbnail_for_page(
-                                        self.current_filename,
-                                        self._page_id(PAGE_PRINTING)
-                                    )
-                                )
+                        )
+                        
                 elif state == "complete":
                     if current_page is None or current_page != PAGE_PRINTING_COMPLETE:
                         await self._navigate_to_page(PAGE_PRINTING_COMPLETE)
+                        self._cached_page = None  # Invalidate cache
+                        
                 else:
-                    if (
-                        current_page is None
-                        or current_page in PRINTING_PAGES
-                        or current_page == PAGE_PRINTING_COMPLETE
-                        or current_page == PAGE_OVERLAY_LOADING
-                    ):
+                    if (current_page is None or 
+                        current_page in PRINTING_PAGES or 
+                        current_page == PAGE_PRINTING_COMPLETE or 
+                        current_page == PAGE_OVERLAY_LOADING):
                         await self._navigate_to_page(PAGE_MAIN, clear_history=True)
+                        self._cached_page = None  # Invalidate cache
 
         if "print_duration" in new_data.get("print_stats", {}):
             self.current_print_duration = new_data["print_stats"]["print_duration"]
@@ -1745,7 +1851,7 @@ class DisplayController:
         )
         await self._go_back()
 
-    def handle_gcode_response(self, response):
+    async def handle_gcode_response(self, response):
         if self.leveling_mode == "screw":
             if "probe at" in response:
                 self.screw_probe_count += 1
@@ -1775,10 +1881,12 @@ class DisplayController:
             self.bed_leveling_counts = [x_count, y_count]
         elif response.startswith("// Adapted mesh bounds"):
             self.bed_leveling_probed_count = 0
-            if self._get_current_page() != PAGE_PRINTING_KAMP:
+            current_page = await self._get_current_page()  
+            if current_page != PAGE_PRINTING_KAMP:
                 self._loop.create_task(self._navigate_to_page(PAGE_PRINTING_KAMP, clear_history=True))
         elif response.startswith("// probe at"):
-            if self._get_current_page() != PAGE_PRINTING_KAMP:
+            current_page = await self._get_current_page()  
+            if current_page != PAGE_PRINTING_KAMP:
                 # We are not leveling, likely response came from manual probe e.g. from console,
                 # Skip updating the state, otherwise it messes up bed leveling screen when printing
                 return
@@ -1810,7 +1918,8 @@ class DisplayController:
         elif response.startswith("// Mesh Bed Leveling Complete"):
             self.bed_leveling_probed_count = 0
             self.bed_leveling_counts = self.full_bed_leveling_counts
-            if self._get_current_page() == PAGE_PRINTING_KAMP:
+            current_page = await self._get_current_page()  
+            if current_page == PAGE_PRINTING_KAMP:
                 self._bed_leveling_complete = True
                 if self.leveling_mode == "full_bed":
                     self._loop.create_task(self.display.show_bed_mesh_final())
@@ -1818,7 +1927,7 @@ class DisplayController:
                     self._loop.create_task(self._handle_bed_leveling_complete())
 
     async def _handle_bed_leveling_complete(self):
-        """Handle completion of bed leveling and ensure thumbnail is loaded"""
+        #Handle completion of bed leveling and ensure thumbnail is loaded
         try:
             logger.info("Bed leveling complete, returning to printing page")
             # Navigate back to printing page
@@ -1828,7 +1937,8 @@ class DisplayController:
             await asyncio.sleep(1)
             
             # Double check we're on the printing page before retrying thumbnail
-            if self._get_current_page() == PAGE_PRINTING and self._last_thumbnail_request and not self._thumbnail_displayed:
+            current_page = await self._get_current_page()  
+            if current_page == PAGE_PRINTING and self._last_thumbnail_request and not self._thumbnail_displayed:
                 logger.info("Retrying thumbnail load after bed leveling")
                 await self.load_thumbnail_for_page(
                     self._last_thumbnail_request['filename'],
