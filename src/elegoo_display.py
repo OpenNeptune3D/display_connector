@@ -1,4 +1,5 @@
 import asyncio
+import time
 from logging import Logger
 from src.communicator import DisplayCommunicator
 from src.mapping import (
@@ -333,6 +334,11 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
         # Firmware version attribute initialized
         self._firmware_version = None
 
+    # Cache WiFi status to avoid delays
+        self._cached_wifi_status = None
+        self._last_wifi_check = 0
+        self._wifi_check_interval = 30  # Only check WiFi every 30 seconds
+
     async def get_firmware_version(self) -> str:
         if self._firmware_version is None:  # Check if the firmware version is cached
             self._firmware_version = await self.display.get("information.lversion.txt", self.timeout)
@@ -544,7 +550,15 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
         )
 
     async def update_wifi_ui(self):
-        has_wifi, ssid, rssi_category = get_wlan0_status()
+        # Use cached WiFi status if checked recently
+        current_time = time.time()
+        if self._cached_wifi_status is not None and (current_time - self._last_wifi_check) < self._wifi_check_interval:
+            has_wifi, ssid, rssi_category = self._cached_wifi_status
+        else:
+            has_wifi, ssid, rssi_category = get_wlan0_status()
+            self._cached_wifi_status = (has_wifi, ssid, rssi_category)
+            self._last_wifi_check = current_time
+
         if not has_wifi:
             await self.write("picq 230,0,42,42,214")
             return False
