@@ -160,8 +160,11 @@ class DisplayController:
         self._handle_config()
         self.connected = False
 
+        self._cached_printer_model = None
+        self._display_initialized = False
+
         display_type = self.config.safe_get("general", "display_type")
-        printer_model = self.get_printer_model()
+        printer_model = self.get_printer_model() 
         self.display = get_communicator(display_type, printer_model)(
             logger,
             printer_model,
@@ -311,20 +314,32 @@ class DisplayController:
                 )
 
     def get_printer_model(self):
+        # Return cached value if already fetched
+        if self._cached_printer_model is not None:
+            return self._cached_printer_model
+        
+        # Check config first
         if "general" in self.config:
             if "printer_model" in self.config["general"]:
-                return self.config["general"]["printer_model"]
+                self._cached_printer_model = self.config["general"]["printer_model"]
+                return self._cached_printer_model
+        
+        # Read from file
         try:
             with open("/boot/.OpenNept4une.txt", "r") as file:
                 for line in file:
                     if line.startswith(tuple(SUPPORTED_PRINTERS)):
                         model_part = line.split("-")[0].strip()
-                        return model_part
+                        self._cached_printer_model = model_part
+                        return self._cached_printer_model
         except FileNotFoundError:
             logger.error("File not found")
         except Exception as e:
             logger.error(f"Error reading file: {e}")
-        return MODEL_N4_REGULAR  # Default if nothing found
+        
+        # Default
+        self._cached_printer_model = MODEL_N4_REGULAR
+        return self._cached_printer_model
 
     async def special_page_handling(self, current_page):
         #Handle special page setup. Called after navigation completes.
@@ -1087,7 +1102,12 @@ class DisplayController:
                     data = ret["result"]["status"]
                     logger.info("Display Type: " + str(self.display.get_display_type_name()))
                     logger.info("Printer Model: " + str(self.display.get_device_name()))
-                    await self.display.initialize_display()
+                    
+                    # Only initialize display once
+                    if not self._display_initialized:
+                        await self.display.initialize_display()
+                        self._display_initialized = True
+                    
                     await self.handle_status_update(data)
                 else:
                     logger.error(f"Unexpected response format from printer.objects.subscribe: {ret}")
@@ -1313,7 +1333,6 @@ class DisplayController:
             logger.info("Reconnected to Display")
             async with self._history_lock:
                 self.history = []
-            await self.display.initialize_display()
             await self._navigate_to_page(PAGE_MAIN, clear_history=True)
         else:
             logger.info(f"Unhandled Event: {type} {data}")
@@ -1548,7 +1567,7 @@ class DisplayController:
             
             logger.info(f"Fetching thumbnail image from {url}")
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=10) as resp:
+                async with session.get(url, timeout=5) as resp:
                     if resp.status != 200:
                         raise aiohttp.ClientError(f"Failed to fetch thumbnail, status code: {resp.status}")
                     img_data = await resp.read()
