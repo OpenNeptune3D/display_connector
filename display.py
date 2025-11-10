@@ -1413,7 +1413,7 @@ class DisplayController:
     async def _get_current_page(self):
         #Get current page with timeout protection
         try:
-            async with asyncio.timeout(2.0):
+            async with asyncio.timeout(5.0):
                 async with self._history_lock:
                     if len(self.history) > 0:
                         return self.history[-1]
