@@ -27,6 +27,9 @@ class DisplayCommunicator:
         self.blocked_by = None
         self.blocked_buffer = []
         self.ips = "--"
+        
+        # ADD: Lock for write operations
+        self._write_lock = asyncio.Lock()
 
         # Ensure TJCClient is properly instantiated
         self.display = TJCClient(port, baudrate, event_handler)
@@ -40,20 +43,28 @@ class DisplayCommunicator:
             raise
 
     async def write(self, data, timeout=None, blocked_key=None):
-        # Check if currently blocked by another operation
-        if self.blocked_by and self.blocked_by != blocked_key:
-            self.blocked_buffer.append(data)
-            return
+        async with self._write_lock:  # Protect buffer access
+            # Check if currently blocked by another operation
+            if self.blocked_by and self.blocked_by != blocked_key:
+                self.blocked_buffer.append(data)
+                return
+            
+            # Set blocked state if a blocking key is provided
+            if blocked_key and not self.blocked_by:
+                self.blocked_by = blocked_key
         
-        # Set blocked state if a blocking key is provided
-        if blocked_key and not self.blocked_by:
-            self.blocked_by = blocked_key
-
+        # Execute command outside lock
         try:
-            await self.display.command(data, timeout if timeout is not None else self.timeout)
+            # Add timeout wrapper
+            effective_timeout = timeout if timeout is not None else self.timeout
+            await asyncio.wait_for(
+                self.display.command(data, effective_timeout),
+                timeout=effective_timeout + 1  # Slightly longer than command timeout
+            )
+        except asyncio.TimeoutError:
+            self.logger.warning(f"Display write timed out for command: {data}")
         except CommandFailed as e:
             # This is expected when components don't exist on the current page
-            # For example, trying to update printing page components while on KAMP page
             self.logger.debug(f"Display command failed (component may not exist on current page): {e}")
         except Exception as e:
             # Other errors should still be logged but not crash
@@ -64,11 +75,17 @@ class DisplayCommunicator:
                 await self.unblock(blocked_key)
 
     async def unblock(self, blocked_key):
-        if self.blocked_by == blocked_key:
-            self.blocked_by = None
-            if self.blocked_buffer:
-                next_command = self.blocked_buffer.pop(0)
-                await self.write(next_command)
+        async with self._write_lock:  # Protect buffer access during unblock
+            if self.blocked_by == blocked_key:
+                self.blocked_by = None
+                if self.blocked_buffer:
+                    next_command = self.blocked_buffer.pop(0)
+                    # Release lock before recursive call
+        
+        # Execute buffered command outside lock (prevent deadlock)
+        if self.blocked_by is None and hasattr(self, '_next_command'):
+            await self.write(self._next_command)
+            delattr(self, '_next_command')
 
     def get_device_name(self):
         return self.model
