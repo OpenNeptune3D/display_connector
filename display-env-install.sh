@@ -3,6 +3,8 @@
 # Update system packages and install Python venv
 sudo apt update
 
+sudo apt install libsystemd-dev -y
+
 # Try to install python3.13-venv first, fall back to python3.11-venv
 if sudo apt-cache show python3.13-venv >/dev/null 2>&1; then
     echo "Installing python3.13-venv..."
