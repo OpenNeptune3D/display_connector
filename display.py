@@ -11,6 +11,26 @@ import io
 import asyncio
 import traceback
 import aiohttp
+import signal
+import systemd.daemon
+
+# Global flag for graceful shutdown
+_shutdown_requested = False
+
+def signal_handler(signum, frame):
+    global _shutdown_requested
+    _shutdown_requested = True
+    log = logging.getLogger(__name__)
+    log.info(f"Received signal {signum}, initiating graceful shutdown...")
+    try:
+        loop.stop()
+    except NameError:
+        pass  # loop not ready yet
+
+# Register signal handlers
+signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
+
 from PIL import Image
 
 from src.config import TEMP_DEFAULTS, ConfigHandler
@@ -125,13 +145,15 @@ SOCKET_LIMIT = 20 * 1024 * 1024
 class ResourceManager:
     
     def __init__(self):
-        self._thread_pool = ThreadPoolExecutor(max_workers=2)
+        self._thread_pool = None
         self._shutdown = False
+        self._lock = asyncio.Lock()
     
     def get_thread_pool(self):
-        if self._shutdown:
-            logger.warning("Thread pool requested after shutdown - returning None")
-            return None
+        """Get thread pool, creating it if necessary"""
+        if self._thread_pool is None and not self._shutdown:
+            logger.info("Creating new thread pool")
+            self._thread_pool = ThreadPoolExecutor(max_workers=2)
         return self._thread_pool
     
     async def cleanup(self):
@@ -147,6 +169,11 @@ class ResourceManager:
             logger.info("Thread pool shutdown initiated (non-blocking)")
         except Exception as e:
             logger.warning(f"Exception during thread pool shutdown: {e}")
+    
+    def allow_new_pool(self):
+        """Allow creating a new thread pool after shutdown"""
+        logger.info("Allowing new thread pool creation")
+        self._shutdown = False
 
 
 class DisplayController:
@@ -229,7 +256,6 @@ class DisplayController:
         self.klipper_restart_event = asyncio.Event()
 
         self.resources = ResourceManager()
-        self._thumbnail_thread_pool = self.resources.get_thread_pool()
 
         self._speed_lock = asyncio.Lock()
 
@@ -448,7 +474,7 @@ class DisplayController:
                 logger.info("Preventing navigation during bed leveling")
                 return
         
-        # PHASE 2: Handle KAMP special case (navigate to PRINTING first if needed)
+        # PHASE 2: Handle KAMP special case
         async with self._history_lock:
             current_page = self.history[-1] if self.history else None
             need_printing_first = (
@@ -457,29 +483,27 @@ class DisplayController:
             )
         
         if need_printing_first:
-            # Modify history under lock (DATA ONLY)
             async with self._history_lock:
                 if clear_history:
                     self.history.clear()
                 self.history.append(PAGE_PRINTING)
+                # Do mapping under lock (fast dict lookup)
                 mapped_printing = self.display.mapper.map_page(PAGE_PRINTING)
             
             # Navigate (outside lock - I/O)
             await self.display.navigate_to(mapped_printing)
-            await asyncio.sleep(0.1)  # Small delay for display to be ready
+            await asyncio.sleep(0.1)
             
             logger.debug(f"Navigating to {PAGE_PRINTING}")
             
-            # Run special page handling (outside lock - I/O)
             try:
                 await self.special_page_handling(PAGE_PRINTING)
             except Exception as e:
                 logger.error(f"Error in special page handling for PRINTING: {e}")
             
-            await asyncio.sleep(0.1)  # Another small delay before navigating to KAMP
+            await asyncio.sleep(0.1)
         
         # PHASE 3: Normal navigation path
-        # Decision phase (under lock - DATA ONLY)
         should_navigate = False
         mapped_page = None
         
@@ -496,6 +520,7 @@ class DisplayController:
                     self.history.append(page)
                 
                 should_navigate = True
+                # Do mapping under lock (fast)
                 mapped_page = self.display.mapper.map_page(page)
         
         # Action phase (outside lock - I/O)
@@ -503,7 +528,6 @@ class DisplayController:
             await self.display.navigate_to(mapped_page)
             logger.debug(f"Navigating to {page}")
 
-            # Invoke per-page overlays or fallback
             try:
                 await self.special_page_handling(page)
             except Exception as e:
@@ -631,18 +655,21 @@ class DisplayController:
         elif action.startswith("speed_adjust_"):
             parts = action.split("_")
             direction = parts[2]
-            current_speed = self.printing_target_speeds[
-                self.printing_selected_speed_type
-            ]
+            current_speed = self.printing_target_speeds[self.printing_selected_speed_type]  # factor
             change = int(self.printing_selected_speed_increment) * (
                 1 if direction == "+" else -1
             )
-            self.send_speed_update(
-                self.printing_selected_speed_type,
-                (current_speed + (change / 100.0)) * 100,
+            new_speed = current_speed + (change / 100.0)  # factor math only
+            self._loop.create_task(
+                self.send_speed_update(self.printing_selected_speed_type, new_speed)
             )
+
         elif action == "speed_reset":
-            self.send_speed_update(self.printing_selected_speed_type, 1.0)
+            # for fan you might prefer 0.0 instead of 1.0
+            reset_value = 1.0 if self.printing_selected_speed_type != "fan" else 0.0
+            self._loop.create_task(
+                self.send_speed_update(self.printing_selected_speed_type, reset_value)
+            )
         elif action.startswith("files_page_"):
             parts = action.split("_")
             direction = parts[2]
@@ -811,12 +838,16 @@ class DisplayController:
             self._loop.create_task(self._go_back())
         elif action.startswith("set_speed_"):
             parts = action.split("_")
-            speed = int(parts[2])
-            self.send_speed_update("print", speed)
+            percent = int(parts[2])
+            self._loop.create_task(
+                self.send_speed_update("print", percent / 100.0)
+            )
         elif action.startswith("set_flow_"):
             parts = action.split("_")
-            speed = int(parts[2])
-            self.send_speed_update("flow", speed)
+            percent = int(parts[2])
+            self._loop.create_task(
+                self.send_speed_update("flow", percent / 100.0)
+            )
         elif action == "reboot_host":
             logger.info("Rebooting Host")
             self._loop.create_task(self._go_back())
@@ -879,52 +910,43 @@ class DisplayController:
 
     async def send_speed_update(self, speed_type, new_speed):
         """Update speed/flow/fan without holding lock during I/O."""
-        
-        # PHASE 1: Prepare gcode command (no lock needed)
         gcode_script = None
         new_target_value = None
-        
-        if new_speed != 1.0:
-            if speed_type == "print":
-                gcode_script = f"M220 S{new_speed:.0f}"
-                new_target_value = new_speed
-            elif speed_type == "flow":
-                gcode_script = f"M221 S{new_speed:.0f}"
-                new_target_value = new_speed
-            elif speed_type == "fan":
-                value = min(max(((new_speed) / 100) * 255, 0), 255)
-                gcode_script = f"M106 S{value}"
-                new_target_value = new_speed
-        else:
-            if speed_type == "print":
-                gcode_script = "M220 S100"
-                new_target_value = 1.0
-            elif speed_type == "flow":
-                gcode_script = "M221 S100"
-                new_target_value = 1.0
-            elif speed_type == "fan":
-                gcode_script = "M106 S0"
-                new_target_value = 0.0
-        
+
+        if speed_type == "print":
+            factor = float(new_speed)
+            percent = factor * 100.0
+            gcode_script = f"M220 S{percent:.0f}"
+            new_target_value = factor
+
+        elif speed_type == "flow":
+            factor = float(new_speed)
+            percent = factor * 100.0
+            gcode_script = f"M221 S{percent:.0f}"
+            new_target_value = factor
+
+        elif speed_type == "fan":
+            factor = min(max(float(new_speed), 0.0), 1.0)   # clamp 0–1
+            value = int(round(factor * 255))
+            gcode_script = f"M106 S{value}"
+            new_target_value = factor
+
         try:
-            # PHASE 2: Send gcode (outside lock - NETWORK I/O)
             if gcode_script:
                 await self._send_moonraker_request(
                     "printer.gcode.script",
-                    {"script": gcode_script}
+                    {"script": gcode_script},
                 )
-            
-            # PHASE 3: Update state (under lock - DATA ONLY)
+
             async with self._speed_lock:
                 if new_target_value is not None:
                     self.printing_target_speeds[speed_type] = new_target_value
                 ui_speed_type = self.printing_selected_speed_type
-                ui_speed_value = self.printing_target_speeds[self.printing_selected_speed_type]
-            
-            # PHASE 4: Update UI (outside lock - DISPLAY I/O)
+                ui_speed_value = self.printing_target_speeds[ui_speed_type]
+
             await self.display.update_printing_speed_settings_ui(
                 ui_speed_type,
-                ui_speed_value
+                ui_speed_value,
             )
         except Exception as e:
             logger.error(f"Error updating speed: {e}")
@@ -1003,7 +1025,9 @@ class DisplayController:
         return self.display.mapper.map_page(page)
 
     async def _go_back(self):
-        # Cancel any pending thumbnail task when navigating
+        """Navigate back without holding locks during I/O operations."""
+        
+        # PHASE 0: Cancel any pending thumbnail task (outside lock - OK)
         if self._thumbnail_task and not self._thumbnail_task.done():
             self._thumbnail_task.cancel()
             try:
@@ -1011,63 +1035,78 @@ class DisplayController:
             except asyncio.CancelledError:
                 pass
         
+        # PHASE 1: Check if we have history (quick check under lock)
         async with self._history_lock:
             history_len = len(self.history)
-        
-        if history_len > 1:
-            # Check if we're in FILES and can step up a directory
-            current_page = await self._get_current_page()  
-            if current_page == PAGE_FILES and self.current_dir != "":
-                self.current_dir = "/".join(self.current_dir.split("/")[:-1])
-                self.files_page = 0
-                await self._load_files()
-                return
-
-            # Pop pages and get mapped page under lock
-            back_page = None
-            mapped_page = None
-            async with self._history_lock:
-                if len(self.history) > 1:
-                    self.history.pop()
-                    while len(self.history) > 1 and self.history[-1] in TRANSITION_PAGES:
-                        self.history.pop()
-                    back_page = self.history[-1] if len(self.history) > 0 else None
-                    # Do mapper lookup under lock (it's fast - just dict access)
-                    if back_page:
-                        mapped_page = self.display.mapper.map_page(back_page)
-            
-            if back_page is None or mapped_page is None:
+            if history_len <= 1:
                 logger.debug("Already at the main page.")
-                return
-
-            # Navigate (outside lock - I/O)
-            await self.display.navigate_to(mapped_page)
-            logger.debug(f"Navigating back to {back_page}")
+                return  # ← This is the ONLY place this message should appear
             
+            # Get current page WITHOUT releasing lock (safe - no await)
+            current_page = self.history[-1] if self.history else None
+        
+        # PHASE 2: Handle FILES special case (outside lock)
+        if current_page == PAGE_FILES and self.current_dir != "":
+            self.current_dir = "/".join(self.current_dir.split("/")[:-1])
+            self.files_page = 0
+            await self._load_files()  # I/O outside lock
+            return
+        
+        # PHASE 3: Pop history and determine navigation (under lock - DATA ONLY)
+        back_page = None
+        mapped_page = None
+        
+        async with self._history_lock:
+            if len(self.history) <= 1:
+                return  # Double-check
+            
+            # Pop current page
+            self.history.pop()
+            
+            # Pop any transition pages
+            while len(self.history) > 1 and self.history[-1] in TRANSITION_PAGES:
+                self.history.pop()
+            
+            # Get target page
+            if len(self.history) > 0:
+                back_page = self.history[-1]
+                # Map page under lock (it's just a dict lookup - fast and safe)
+                mapped_page = self.display.mapper.map_page(back_page)
+        
+        # PHASE 4: Navigate (outside lock - I/O)
+        if back_page is None or mapped_page is None:
+            logger.debug("No valid page to navigate back to.")
+            return
+        
+        await self.display.navigate_to(mapped_page)
+        logger.debug(f"Navigating back to {back_page}")
+        
+        # PHASE 5: Special page handling (outside lock - I/O)
+        try:
             await self.special_page_handling(back_page)
+        except Exception as e:
+            logger.error(f"Error in special page handling: {e}")
+        
+        # PHASE 6: Handle thumbnail retry for printing page (outside lock)
+        if back_page == PAGE_PRINTING:
+            async with self._filename_lock:
+                has_filename = self.current_filename is not None
+                has_last_request = self._last_thumbnail_request is not None
+                is_displayed = self._thumbnail_displayed
+                filename = self.current_filename
             
-            # Load/retry thumbnail if on printing page
-            if back_page == PAGE_PRINTING:
-                async with self._filename_lock:
-                    has_filename = self.current_filename is not None
-                    has_last_request = self._last_thumbnail_request is not None
-                    is_displayed = self._thumbnail_displayed
-                    filename = self.current_filename
-                
-                if has_filename and not is_displayed:
-                    if has_last_request:
-                        self._thumbnail_task = self._loop.create_task(
-                            self.retry_last_thumbnail()
+            if has_filename and not is_displayed:
+                if has_last_request:
+                    self._thumbnail_task = self._loop.create_task(
+                        self.retry_last_thumbnail()
+                    )
+                else:
+                    self._thumbnail_task = self._loop.create_task(
+                        self.load_thumbnail_for_page(
+                            filename,
+                            self._page_id(PAGE_PRINTING)
                         )
-                    else:
-                        self._thumbnail_task = self._loop.create_task(
-                            self.load_thumbnail_for_page(
-                                filename,
-                                self._page_id(PAGE_PRINTING)
-                            )
-                        )
-        else:
-            logger.debug("Already at the main page.")
+                    )
 
     def start_listening(self):
         # Don't start if already listening
@@ -1082,6 +1121,10 @@ class DisplayController:
         logger.info("Starting listen task")
         try:
             self._is_listening = True
+
+            # Allow thread pool recreation after potential shutdown
+            self.resources.allow_new_pool()
+
             
             # Connect to display
             try:
@@ -1414,10 +1457,10 @@ class DisplayController:
                 if "position_max" in new_data["config"]["stepper_x"]:
                     max_x = int(new_data["config"]["stepper_x"]["position_max"])
             if "stepper_y" in new_data["config"]:
-                if "position_max" in new_data["config"]["stepper_x"]:
+                if "position_max" in new_data["config"]["stepper_y"]:
                     max_y = int(new_data["config"]["stepper_y"]["position_max"])
             if "stepper_z" in new_data["config"]:
-                if "position_max" in new_data["config"]["stepper_x"]:
+                if "position_max" in new_data["config"]["stepper_z"]:
                     max_z = int(new_data["config"]["stepper_z"]["position_max"])
 
             if max_x > 0 and max_y > 0 and max_z > 0:
@@ -1453,21 +1496,28 @@ class DisplayController:
                 
                 # Clear the listening flag if it's stuck
                 self._is_listening = False
+
+                # Allow thread pool recreation
+                self.resources.allow_new_pool()
                 
                 self.start_listening()
             finally:
                 self._is_reconnecting = False
 
+    async def _get_current_page_unsafe(self):
+        """Get current page WITHOUT lock - caller must hold _history_lock"""
+        if len(self.history) > 0:
+            return self.history[-1]
+        return None
+
     async def _get_current_page(self):
-        #Get current page with timeout protection
+        """Get current page safely with timeout protection"""
         try:
             async with asyncio.timeout(5.0):
                 async with self._history_lock:
-                    if len(self.history) > 0:
-                        return self.history[-1]
-                    return None
+                    return await self._get_current_page_unsafe()
         except asyncio.TimeoutError:
-            logger.error("DEADLOCK DETECTED in _get_current_page() - lock timeout after 2s")
+            logger.error("DEADLOCK DETECTED in _get_current_page() - lock timeout after 5s")
             import traceback
             logger.error("Stack trace:\n" + "".join(traceback.format_stack()))
             return None
@@ -1629,12 +1679,18 @@ class DisplayController:
             
             logger.info("Starting thumbnail parsing")
             loop = asyncio.get_running_loop()
+
+            # Get thread pool (will be created if needed)
+            thread_pool = self.resources.get_thread_pool()
+            if thread_pool is None:
+                logger.error("Thread pool unavailable (shutdown state)")
+                return None
             
             # PHASE 2: Parse image with timeout (10 seconds max)
             try:
                 image = await asyncio.wait_for(
                     loop.run_in_executor(
-                        self._thumbnail_thread_pool,
+                        thread_pool,
                         parse_thumbnail,
                         thumbnail,
                         160,
@@ -1668,10 +1724,10 @@ class DisplayController:
             data_mapping = self.display.mapper.data_mapping
         
         # RATE LIMITING: Only check page max once per second
-        import time
         if not hasattr(self, '_last_page_check_time'):
             self._last_page_check_time = 0
             self._cached_page = None
+            self._page_check_lock = asyncio.Lock()  # NEW: Separate lock
         
         now = time.time()
         time_since_last_check = now - self._last_page_check_time
@@ -1684,11 +1740,14 @@ class DisplayController:
         
         # Check page if: state changed OR >1 second elapsed
         if has_state_change or time_since_last_check > 1.0:
-            current_page = await self._get_current_page()
-            self._cached_page = current_page
-            self._last_page_check_time = now
+            # Use dedicated lock to avoid blocking history operations
+            async with self._page_check_lock:
+                async with self._history_lock:
+                    current_page = self.history[-1] if self.history else None
+                self._cached_page = current_page
+                self._last_page_check_time = now
         else:
-            # Use cached value
+            # Use cached value (no lock needed for read)
             current_page = self._cached_page
         
         if current_page == PAGE_MAIN:
@@ -2109,6 +2168,22 @@ try:
     # start watching files
     config_observer.start()
 
+    # Notify systemd we're ready
+    systemd.daemon.notify('READY=1')
+    logger.info("Service ready, notified systemd")
+
+    # Watchdog ping task
+    async def watchdog_ping():
+        while not _shutdown_requested:
+            try:
+                systemd.daemon.notify('WATCHDOG=1')
+                await asyncio.sleep(30)  # Ping every 30 seconds (WatchdogSec=60)
+            except Exception as e:
+                logger.error(f"Watchdog ping failed: {e}")
+
+    # Start watchdog ping
+    loop.create_task(watchdog_ping())
+
     # after one second, start pumping display events
     loop.call_later(1, controller.start_listening)
 
@@ -2119,7 +2194,22 @@ except Exception as e:
     logger.error("Error communicating...: " + str(e))
     logger.error(traceback.format_exc())
 finally:
+    _shutdown_requested = True
+    systemd.daemon.notify('STOPPING=1')
+    logger.info("Shutting down service...")
+    
     config_observer.stop()
     if config_observer.is_alive():
-        config_observer.join()
+        config_observer.join(timeout=5)
+    
+    # Ensure all tasks are cancelled
+    pending = asyncio.all_tasks()
+    for task in pending:
+        task.cancel()
+    
+    # Wait for tasks to finish with timeout
+    if pending:
+        loop.run_until_complete(asyncio.wait(pending, timeout=5))
+    
     loop.close()
+    logger.info("Service stopped")
