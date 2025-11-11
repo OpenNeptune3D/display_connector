@@ -62,6 +62,11 @@ StartLimitBurst=5
 # Timeouts
 TimeoutStartSec=60
 TimeoutStopSec=30
+WatchdogSec=60
+KillMode=mixed
+SendSIGKILL=yes
+FinalKillSignal=SIGKILL
+RemainAfterExit=no
 
 # Memory limits - 256M max, throttle at 200M
 MemoryMax=256M
