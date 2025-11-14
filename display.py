@@ -23,9 +23,9 @@ def signal_handler(signum, frame):
     log = logging.getLogger(__name__)
     log.info(f"Received signal {signum}, initiating graceful shutdown...")
     try:
-        loop.stop()
-    except NameError:
-        pass  # loop not ready yet
+        loop.call_soon_threadsafe(loop.stop)
+    except Exception:
+        pass
 
 # Register signal handlers
 signal.signal(signal.SIGTERM, signal_handler)
@@ -2108,7 +2108,8 @@ class DisplayController:
 
 
 
-loop = asyncio.get_event_loop()
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
 config_observer = Observer()
 
 try:
@@ -2202,14 +2203,22 @@ finally:
     if config_observer.is_alive():
         config_observer.join(timeout=5)
     
-    # Ensure all tasks are cancelled
-    pending = asyncio.all_tasks()
-    for task in pending:
+    # Ensure all tasks are cancelled (Py 3.13 safe)
+    try:
+        asyncio.get_running_loop()   # raises if no loop is running
+        pending = asyncio.all_tasks()
+    except RuntimeError:
+        pending = set()
+
+    for task in list(pending):
         task.cancel()
-    
-    # Wait for tasks to finish with timeout
+
     if pending:
-        loop.run_until_complete(asyncio.wait(pending, timeout=5))
+        try:
+            loop.run_until_complete(asyncio.wait(pending, timeout=5))
+        except RuntimeError:
+            # Loop may already be closed or not runnable here; best-effort shutdown.
+            pass
     
     loop.close()
     logger.info("Service stopped")
