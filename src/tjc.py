@@ -1,4 +1,5 @@
 import struct
+import asyncio
 from collections import namedtuple
 from enum import IntEnum
 from nextion import Nextion
@@ -160,26 +161,62 @@ class TJCClient(Nextion):
             self.logger.error(f"Unexpected error while handling message: {message}, error: {e}")
 
     async def reconnect(self):
-        """Reconnect to the device."""
-        await self._connection.close()
+        """Reconnect to the device (idempotent)."""
+        if getattr(self, "is_reconnecting", False):
+            return
         self.is_reconnecting = True
-        await self.connect()
+        try:
+            try:
+                await self._connection.close()
+            except Exception:
+                pass
+            await self.connect()
+        finally:
+            # connect() will clear this when it succeeds; make sure we don't get stuck
+            self.is_reconnecting = False
+
 
     async def connect(self) -> None:
-        """Connect to the device with error handling."""
+        """Connect to the device with a quick, safe re-init."""
         try:
             await self._try_connect_on_different_baudrates()
+            for method in ("reset_input_buffer", "reset_output_buffer", "flush"):
+                try:
+                    fn = getattr(self._connection, method)
+                    if callable(fn):
+                        r = fn()
+                        if asyncio.iscoroutine(r):
+                            await r
+                except Exception:
+                    pass
+            # Make panel return detailed acks if it's awake
             try:
                 await self._command("bkcmd=3", attempts=1)
             except CommandTimeout:
                 pass
-
+            # Wake panel in case it slept during idle timeout (ignore if it doesn't answer)
+            try:
+                await self._command("sleep=0", attempts=1)
+            except CommandTimeout:
+                pass
+            # Force a known page to avoid "variable name invalid" after long idle
+            try:
+                await self._command("page main", attempts=1)
+                # if you track this, keep it in sync
+                setattr(self, "current_page", "main")
+                await asyncio.sleep(0.25)  # small settle so HMI swaps pages
+            except CommandTimeout:
+                pass
+            # (Nice-to-have) ask the panel to report the current page; ignore if no reply
+            try:
+                await self._command("sendme", attempts=1)  # Nextion/TJC emits 0x66 <pageId>
+            except CommandTimeout:
+                pass
             await self._update_sleep_status()
-            if self.is_reconnecting:
+            if getattr(self, "is_reconnecting", False):
                 self.is_reconnecting = False
                 self._schedule_event_message_handler(EventType.RECONNECTED, None)
         except ConnectionFailed:
             raise
         except Exception as e:
-            # Log the exception or handle it appropriately
             raise e
