@@ -115,7 +115,7 @@ renice_unit       display.service 19
 ionice_unit_idle  display.service
 
 # Realtime for Linux-process MCU; Klipper slightly favoured (non-RT)
-chrt_fifo_unit    klipper-mcu.service 80
+chrt_fifo_unit    klipper-mcu.service 60
 renice_unit       klipper.service -5
 
 exit 0
