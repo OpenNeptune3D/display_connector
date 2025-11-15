@@ -3,6 +3,7 @@
 # - Pins UART IRQs dynamically by name (ttyS0/ttyS1)
 # - Sets cpuset (AllowedCPUs=) with fallback to taskset
 # - Applies priorities w/out editing vendor unit files
+# - Waits for services and IRQs to exist to avoid boot races
 
 set -eu
 
@@ -11,16 +12,43 @@ MCU_CPU=3        # ttyS0 IRQ + klipper-mcu (RT)
 DISPLAY_CPU=1    # ttyS1 IRQ + display
 KLIPPER_CPU=2    # klipper (host)
 
+# --- wait helpers ----------------------------------------------------------
+wait_active() { # wait until unit is active and has a PID (max ~15s)
+  unit="$1"; t=0
+  while [ $t -lt 30 ]; do
+    state=$(systemctl is-active "$unit" 2>/dev/null || true)
+    pid=$(systemctl show -p MainPID --value "$unit" 2>/dev/null || echo 0)
+    if [ "$state" = "active" ] && [ "${pid:-0}" -gt 0 ]; then
+      return 0
+    fi
+    sleep 0.5; t=$((t+1))
+  done
+  return 0
+}
+
+wait_irq_present() { # wait until /proc/interrupts shows the device (max ~10s)
+  dev="$1"; t=0
+  while [ $t -lt 20 ]; do
+    irq=$(awk -v n="$dev" '$NF==n{gsub(":", "", $1); print $1; exit}' /proc/interrupts)
+    [ -n "$irq" ] && return 0
+    sleep 0.5; t=$((t+1))
+  done
+  return 0
+}
+
 # --- helpers ---------------------------------------------------------------
 irq_for() { awk -v name="$1" '$NF==name{gsub(":", "", $1); print $1; exit}' /proc/interrupts; }
 
 pin_irq() {
   irq="$1"; cpu="$2"
   [ -n "$irq" ] || return 0
-  if [ -w "/proc/irq/$irq/smp_affinity_list" ]; then
-    echo "$cpu" > "/proc/irq/$irq/smp_affinity_list"
+  path="/proc/irq/$irq"
+  [ -d "$path" ] || return 0
+  if [ -w "$path/smp_affinity_list" ]; then
+    echo "$cpu" > "$path/smp_affinity_list" || true
   else
-    printf '%x\n' $((1<<cpu)) > "/proc/irq/$irq/smp_affinity"
+    # hex mask fallback
+    printf '%x\n' $((1<<cpu)) > "$path/smp_affinity" || true
   fi
 }
 
@@ -54,8 +82,15 @@ chrt_fifo_unit() {
   [ -n "$pid" ] && [ "$pid" -gt 0 ] && chrt -f -p "$prio" "$pid" >/dev/null 2>&1 || true
 }
 
-# --- prep ------------------------------------------------------------------
+# --- prep (allow RT threads to run without group throttling) --------------
 sysctl -w kernel.sched_rt_runtime_us=-1 >/dev/null 2>&1 || true
+
+# Ensure the services are up and the UART IRQs exist (handles boot races)
+wait_active klipper-mcu.service
+wait_active klipper.service
+wait_active display.service
+wait_irq_present ttyS0
+wait_irq_present ttyS1
 
 # --- IRQ pinning (by name, dynamic) ---------------------------------------
 IRQ_S0="$(irq_for ttyS0 || true)"
