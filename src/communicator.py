@@ -43,50 +43,61 @@ class DisplayCommunicator:
             raise
 
     async def write(self, data, timeout=None, blocked_key=None):
-        async with self._write_lock:  # Protect buffer access
-            # Check if currently blocked by another operation
+        # Fast path: decide blocking under lock
+        async with self._write_lock:
+            # If someone else is blocking, queue this command
             if self.blocked_by and self.blocked_by != blocked_key:
-                self.blocked_buffer.append(data)
+                self.blocked_buffer.append((data, timeout))
                 return
-            
-            # Set blocked state if a blocking key is provided
+
+            # Claim the block if caller provided a key and none is set
             if blocked_key and not self.blocked_by:
                 self.blocked_by = blocked_key
-        
-        # Execute command outside lock
+
+        # Execute the command outside the lock
         try:
-            # Add timeout wrapper
-            effective_timeout = timeout if timeout is not None else self.timeout
+            effective_timeout = self.timeout if timeout is None else timeout
             await asyncio.wait_for(
                 self.display.command(data, effective_timeout),
-                timeout=effective_timeout + 1  # Slightly longer than command timeout
+                timeout=effective_timeout + 1  # slight cushion over device timeout
             )
         except asyncio.TimeoutError:
             self.logger.warning(f"Display write timed out for command: {data}")
+            # Quick, robust recovery: re-sync the panel and bail out of this burst
+            try:
+                # If your client exposes .reconnect(), use it; otherwise call whatever
+                # you use on initial connect/init (bkcmd, sleep=0, sendme, etc.).
+                await self.display.reconnect()
+            except Exception as e:
+                self.logger.warning(f"Display reconnect failed after timeout: {e}")
+            return
         except CommandFailed as e:
-            # This is expected when components don't exist on the current page
-            self.logger.debug(f"Display command failed (component may not exist on current page): {e}")
+            # Expected if we target a control not present on the current page
+            self.logger.debug(
+                f"Display command failed (component may not exist on current page): {e}"
+            )
         except Exception as e:
-            # Other errors should still be logged but not crash
+            # Any other error: log and continue
             self.logger.warning(f"Unexpected error writing to display: {e}")
         finally:
-            # If this was a blocking operation, unblock afterwards
+            # If this was a blocking op, release block and send the next queued command (if any)
             if blocked_key:
                 await self.unblock(blocked_key)
 
     async def unblock(self, blocked_key):
-        async with self._write_lock:  # Protect buffer access during unblock
+        next_item = None
+        async with self._write_lock:
             if self.blocked_by == blocked_key:
                 self.blocked_by = None
                 if self.blocked_buffer:
-                    next_command = self.blocked_buffer.pop(0)
-                    # Release lock before recursive call
-        
-        # Execute buffered command outside lock (prevent deadlock)
-        if self.blocked_by is None and hasattr(self, '_next_command'):
-            await self.write(self._next_command)
-            delattr(self, '_next_command')
+                    # pop the next queued command (FIFO)
+                    next_item = self.blocked_buffer.pop(0)
 
+        # Send the next queued command outside the lock to avoid deadlocks
+        if next_item is not None and self.blocked_by is None:
+            data, timeout = next_item
+            await self.write(data, timeout=timeout)
+        
     def get_device_name(self):
         return self.model
     
@@ -102,8 +113,10 @@ class DisplayCommunicator:
         return current
 
     async def navigate_to(self, page_id):
-        await self.write(f"page {page_id}")
-        await asyncio.sleep(0.25)  # Small delay to ensure the page change is processed
+        # Block other writes while we switch pages
+        await self.write(f"page {page_id}", blocked_key="__nav__")
+        await asyncio.sleep(0.25)  # give the HMI time to swap pages
+        await self.unblock("__nav__")
 
     async def update_data(self, new_data, data_mapping=None, current_data=None):
         if data_mapping is None:
