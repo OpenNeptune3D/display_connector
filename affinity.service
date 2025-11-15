@@ -1,0 +1,16 @@
+[Unit]
+Description=Pin UART IRQs and set CPU affinities/priorities for Klipper stack (dynamic detection)
+After=multi-user.target klipper-mcu.service klipper.service display.service
+Wants=klipper-mcu.service klipper.service display.service
+PartOf=klipper-mcu.service klipper.service display.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/affinity-setup.sh
+
+[Install]
+WantedBy=multi-user.target
+WantedBy=display.service
+WantedBy=klipper.service
+WantedBy=klipper-mcu.service
