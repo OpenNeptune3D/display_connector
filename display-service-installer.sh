@@ -1,118 +1,74 @@
 #!/bin/bash
+set -euo pipefail
 
-sudo rm -rf ~/display_connector/venv
-rm -rf ~/display_connector/__pycache__
-# Run the first script
-~/display_connector/display-env-install.sh
-
-# Define the service file path, script path, and log file path
+# --- Paths/constants -------------------------------------------------------
 OLD_SERVICE_FILE="/etc/systemd/system/OpenNept4une.service"
-SERVICE_FILE="/etc/systemd/system/display.service"
-SCRIPT_PATH="$HOME/display_connector/display.py"
-VENV_PATH="$HOME/display_connector/venv"
-LOG_FILE="/var/log/display.log"
+DISPLAY_SERVICE_FILE="/etc/systemd/system/display.service"
+AFFINITY_SERVICE_FILE="/etc/systemd/system/affinity.service"
+AFFINITY_SCRIPT_PATH="/usr/local/sbin/affinity-setup.sh"
+
+DISPLAY_CONNECTOR_PATH="$HOME/display_connector"
+SCRIPT_PATH="$DISPLAY_CONNECTOR_PATH/display.py"
+ENV_INSTALLER="$DISPLAY_CONNECTOR_PATH/display-env-install.sh"
+VENV_DIR="$DISPLAY_CONNECTOR_PATH/venv"
+PYCACHE_DIR="$DISPLAY_CONNECTOR_PATH/__pycache__"
+
 MOONRAKER_ASVC="$HOME/printer_data/moonraker.asvc"
 
-# Check if the script exists
-if [ ! -f "$SCRIPT_PATH" ]; then
-    echo "Error: Script $SCRIPT_PATH not found."
-    exit 1
+# --- Preflight ---------------------------------------------------------------
+# fail clearly if source files are missing.
+[ -f "$SCRIPT_PATH" ] || { echo "Error: $SCRIPT_PATH not found."; exit 1; }
+[ -f "$ENV_INSTALLER" ] || { echo "Error: $ENV_INSTALLER not found."; exit 1; }
+[ -f "$DISPLAY_CONNECTOR_PATH/display.service" ] || { echo "Error: display.service not found in $DISPLAY_CONNECTOR_PATH"; exit 1; }
+[ -f "$DISPLAY_CONNECTOR_PATH/affinity.service" ] || { echo "Error: affinity.service not found in $DISPLAY_CONNECTOR_PATH"; exit 1; }
+[ -f "$DISPLAY_CONNECTOR_PATH/affinity-setup.sh" ] || { echo "Error: affinity-setup.sh not found in $DISPLAY_CONNECTOR_PATH"; exit 1; }
+
+# --- Stop display early (avoid venv race) ------------------------------------
+if systemctl is-active --quiet display.service; then
+  sudo systemctl stop display.service >/dev/null 2>&1 || true
 fi
 
-# Check if the old service exists and is running
-if systemctl is-active --quiet OpenNept4une; then
-    # Stop the service silently
-    sudo service OpenNept4une stop >/dev/null 2>&1
-    # Disable the service silently
-    sudo service OpenNept4une disable >/dev/null 2>&1
-    sudo rm -f $OLD_SERVICE_FILE
-else
-    echo "Continuing..."
+# --- Rebuild environment -----------------------------------------------------
+# keep $HOME clean;
+rm -rf "$VENV_DIR" "$PYCACHE_DIR"
+bash "$ENV_INSTALLER"
+
+# --- Legacy unit cleanup -----------------------------------------------------
+if systemctl list-unit-files | grep -q '^OpenNept4une\.service'; then
+  sudo systemctl disable --now OpenNept4une.service || true
 fi
+[ -e "$OLD_SERVICE_FILE" ] && sudo rm -f "$OLD_SERVICE_FILE"
 
-if systemctl is-active --quiet display; then
-    # Stop the service silently
-    sudo service display stop >/dev/null 2>&1
-else
-    echo "Continuing..."
-fi
+# --- Install units and script ------------------------------------------------
+echo "Installing display.service to $DISPLAY_SERVICE_FILE"
+sudo cp "$DISPLAY_CONNECTOR_PATH/display.service" "$DISPLAY_SERVICE_FILE" >/dev/null
 
-# Create the systemd service file 
-echo "Creating systemd service file at $SERVICE_FILE..."
-cat <<EOF | sudo tee $SERVICE_FILE > /dev/null
-[Unit]
-Description=OpenNept4une TouchScreen Display Service
-After=klipper.service klipper-mcu.service moonraker.service
-Wants=klipper.service moonraker.service
-Documentation=https://github.com/OpenNeptune3D/display_connector
+echo "Installing affinity-setup.sh to $AFFINITY_SCRIPT_PATH"
+sudo cp "$DISPLAY_CONNECTOR_PATH/affinity-setup.sh" "$AFFINITY_SCRIPT_PATH" >/dev/null
+sudo chmod +x "$AFFINITY_SCRIPT_PATH" >/dev/null
 
-[Service]
-Type=simple
-User=mks
-Group=mks
-WorkingDirectory=/home/mks/display_connector
-ExecStartPre=/bin/sleep 10
-ExecStart=/home/mks/display_connector/venv/bin/python /home/mks/display_connector/display.py
+echo "Installing affinity.service to $AFFINITY_SERVICE_FILE"
+sudo cp "$DISPLAY_CONNECTOR_PATH/affinity.service" "$AFFINITY_SERVICE_FILE" >/dev/null
 
-# Restart configuration
-Restart=on-failure
-RestartSec=10
-StartLimitBurst=5
-
-# Timeouts
-TimeoutStartSec=60
-TimeoutStopSec=30
-WatchdogSec=60
-KillMode=mixed
-SendSIGKILL=yes
-FinalKillSignal=SIGKILL
-RemainAfterExit=no
-
-# Memory limits - 256M max, throttle at 200M
-MemoryMax=256M
-MemoryHigh=200M
-MemorySwapMax=128M
-
-# CPU limits - 25% of one core maximum
-CPUQuota=35%
-CPUWeight=50
-Nice=5
-
-# I/O priority
-IOSchedulingClass=2
-IOSchedulingPriority=4
-
-# Task/thread limits
-TasksMax=200
-
-# File descriptor limits
-LimitNOFILE=1024
-
-# Security hardening
-ProtectSystem=full
-PrivateTmp=true
-NoNewPrivileges=true
-ProtectKernelTunables=true
-ProtectControlGroups=true
-
-# Logging
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Reload systemd to read new service file
-echo "Reloading systemd..."
+# --- Reload systemd ----------------------------------------------------------
+echo "Reloading systemd units..."
 sudo systemctl daemon-reload
 
-# Enable and start the service
-echo "Enabling and starting the service..."
+# --- Enable + start services -------------------------------------------------
+echo "Enabling and starting affinity.service..."
+sudo systemctl enable affinity.service
+sudo systemctl start affinity.service
+
+echo "Enabling and starting display.service..."
 sudo systemctl enable display.service
 sudo systemctl start display.service
 
-echo "Allowing Moonraker to control display service"
-grep -qxF 'display' $MOONRAKER_ASVC || echo 'display' >> $MOONRAKER_ASVC
+# --- Moonraker allowlist update ----------------------------------------------
+echo "Allowing Moonraker to control display service..."
+sudo touch "$MOONRAKER_ASVC"
+grep -qxF 'display' "$MOONRAKER_ASVC" || echo 'display' | sudo tee -a "$MOONRAKER_ASVC" >/dev/null
 
-sudo service moonraker restart
+# --- Restart Moonraker -------------------------------------------------------
+sudo systemctl restart moonraker
+
+echo "Done."
