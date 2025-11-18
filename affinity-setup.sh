@@ -8,7 +8,7 @@
 set -eu
 
 # CPU layout (0-based):
-MISC_CPU=0             # ttyS2 IRQ (linux console serial) + Moonraker.service + Mobileraker.service + Mjpg-streamer.service
+MISC_CPU=0             # ttyS2 IRQ (linux console serial) + Moonraker.service + Mobileraker.service + Mjpg-streamer.service + power_monitor.service
 DISPLAY_TTY_CPU=1      # ttyS1 IRQ (display serial) + display.service 
 KLIPPER_MCU_RPI_CPU=2  # klipper-mcu.service (Linux host gpio control ADXL & LED)
 KLIPPER_MCU_TTY_CPU=3  # ttyS0 IRQ (klipper serial) + klipper.service (RT)
@@ -84,7 +84,7 @@ chrt_fifo_unit() {
 }
 
 # --- prep (allow RT threads to run without group throttling) --------------
-sysctl -w kernel.sched_rt_runtime_us=-1 >/dev/null 2>&1 || true
+sysctl -w kernel.sched_rt_runtime_us=950000 >/dev/null 2>&1 || true
 
 # Ensure the services are up and the UART IRQs exist (handles boot races)
 wait_active klipper.service
@@ -105,7 +105,7 @@ IRQ_S2="$(irq_for ttyS2 || true)"
 
 # --- Serial tuning for MCU UART -------------------------------------------
 command -v setserial >/dev/null 2>&1 && setserial /dev/ttyS0 low_latency || true
-stty -F /dev/ttyS0 -ixon -ixoff 2>/dev/null || true
+stty -F /dev/ttyS0 cs8 -parenb -cstopb -ixon -ixoff -crtscts -icanon -echo -echoe -echok -echoctl -echoke -iexten -inlcr -igncr -icrnl -opost -hupcl min 1 time 0 || true
 
 # --- Unit cpus & priorities ------------------------------------------------
 # Keep display OFF MCU & Klipper cores
@@ -116,7 +116,7 @@ set_unit_cpus display.service     "$DISPLAY_TTY_CPU"
 set_unit_cpus moonraker.service "$MISC_CPU"
 set_unit_cpus mjpg-streamer-webcam1.service "$MISC_CPU"
 set_unit_cpus mobileraker.service "$MISC_CPU"
-
+set_unit_cpus power_monitor.service "$MISC_CPU"
 
 # Make display gentle (no bursty quotas; tiny CPU weight; low prio + idle IO)
 systemctl set-property --runtime display.service CPUQuota= >/dev/null 2>&1 || true
