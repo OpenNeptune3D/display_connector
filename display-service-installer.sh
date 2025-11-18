@@ -39,6 +39,9 @@ if systemctl list-unit-files | grep -q '^OpenNept4une\.service'; then
 fi
 [ -e "$OLD_SERVICE_FILE" ] && sudo rm -f "$OLD_SERVICE_FILE"
 
+# --- Enable Performance CPU --------------------------------------------------
+echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+
 # --- Install units and script ------------------------------------------------
 echo "Installing display.service to $DISPLAY_SERVICE_FILE"
 sudo cp "$DISPLAY_CONNECTOR_PATH/display.service" "$DISPLAY_SERVICE_FILE" >/dev/null
