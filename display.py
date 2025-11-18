@@ -1403,9 +1403,17 @@ class DisplayController:
             self.handle_input(data.page_id, data.component_id, data.value)
         elif type == EventType.RECONNECTED:
             logger.info("Reconnected to Display")
+            # Clear history so we don't fight with a stale page stack
             async with self._history_lock:
                 self.history = []
-            await self._navigate_to_page(PAGE_MAIN, clear_history=True)
+            # Choose a page based on current printer state to avoid "variable name invalid"
+            state = getattr(self, "current_state", None)
+            target = PAGE_MAIN
+            if state in ("printing", "paused") and not self._bed_leveling_complete:
+                target = PAGE_PRINTING
+            elif state == "complete":
+                target = PAGE_PRINTING_COMPLETE
+            await self._navigate_to_page(target, clear_history=True)
         else:
             logger.info(f"Unhandled Event: {type} {data}")
 
