@@ -8,9 +8,10 @@
 set -eu
 
 # CPU layout (0-based):
-MCU_CPU=3        # ttyS0 IRQ + klipper-mcu (RT)
-DISPLAY_CPU=1    # ttyS1 IRQ + display
-KLIPPER_CPU=2    # klipper (host)
+MISC_CPU=0             # ttyS2 IRQ (linux console serial) + Moonraker.service + Mobileraker.service + Mjpg-streamer.service
+DISPLAY_TTY_CPU=1      # ttyS1 IRQ (display serial) + display.service 
+KLIPPER_MCU_RPI_CPU=2  # klipper-mcu.service (Linux host gpio control ADXL & LED)
+KLIPPER_MCU_TTY_CPU=3  # ttyS0 IRQ (klipper serial) + klipper.service (RT)
 
 # --- wait helpers ----------------------------------------------------------
 wait_active() { # wait until unit is active and has a PID (max ~15s)
@@ -86,17 +87,21 @@ chrt_fifo_unit() {
 sysctl -w kernel.sched_rt_runtime_us=-1 >/dev/null 2>&1 || true
 
 # Ensure the services are up and the UART IRQs exist (handles boot races)
-wait_active klipper-mcu.service
 wait_active klipper.service
+wait_active klipper-mcu.service
+wait_active moonraker.service
 wait_active display.service
 wait_irq_present ttyS0
 wait_irq_present ttyS1
+wait_irq_present ttyS2
 
 # --- IRQ pinning (by name, dynamic) ---------------------------------------
 IRQ_S0="$(irq_for ttyS0 || true)"
 IRQ_S1="$(irq_for ttyS1 || true)"
-[ -n "${IRQ_S0:-}" ] && pin_irq "$IRQ_S0" "$MCU_CPU"
-[ -n "${IRQ_S1:-}" ] && pin_irq "$IRQ_S1" "$DISPLAY_CPU"
+IRQ_S2="$(irq_for ttyS2 || true)"
+[ -n "${IRQ_S0:-}" ] && pin_irq "$IRQ_S0" "$KLIPPER_MCU_TTY_CPU"
+[ -n "${IRQ_S1:-}" ] && pin_irq "$IRQ_S1" "$DISPLAY_TTY_CPU"
+[ -n "${IRQ_S2:-}" ] && pin_irq "$IRQ_S2" "$MISC_CPU"
 
 # --- Serial tuning for MCU UART -------------------------------------------
 command -v setserial >/dev/null 2>&1 && setserial /dev/ttyS0 low_latency || true
@@ -104,9 +109,14 @@ stty -F /dev/ttyS0 -ixon -ixoff 2>/dev/null || true
 
 # --- Unit cpus & priorities ------------------------------------------------
 # Keep display OFF MCU & Klipper cores
-set_unit_cpus klipper-mcu.service "$MCU_CPU"
-set_unit_cpus klipper.service     "$KLIPPER_CPU"
-set_unit_cpus display.service     "0-1"          # CPUs 0 and 1
+set_unit_cpus klipper-mcu.service "$KLIPPER_MCU_RPI_CPU"
+set_unit_cpus klipper.service     "$KLIPPER_MCU_TTY_CPU"
+set_unit_cpus display.service     "$DISPLAY_TTY_CPU"         
+
+set_unit_cpus moonraker.service "$MISC_CPU"
+set_unit_cpus mjpg-streamer-webcam1.service "$MISC_CPU"
+set_unit_cpus mobileraker.service "$MISC_CPU"
+
 
 # Make display gentle (no bursty quotas; tiny CPU weight; low prio + idle IO)
 systemctl set-property --runtime display.service CPUQuota= >/dev/null 2>&1 || true
