@@ -5,7 +5,7 @@ Wants=klipper-mcu.service klipper.service display.service
 #PartOf=klipper-mcu.service klipper.service display.service
 
 [Service]
-Type=oneshot
+Type=idle
 RemainAfterExit=yes
 ExecStart=/usr/local/sbin/affinity-setup.sh
 
