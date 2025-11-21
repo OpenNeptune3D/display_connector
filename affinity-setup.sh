@@ -15,10 +15,10 @@ if [ "$(id -u)" != 0 ]; then
 fi
 
 # --- CPU layout (0-based) ----------------------------------------------------
-MISC_CPU=0
-DISPLAY_TTY_CPU=1
-KLIPPER_MCU_RPI_CPU=2
-KLIPPER_MCU_TTY_CPU=3
+MISC_CPU=0               # moonraker/mobileraker/mjpg-streamer/power_monitor + ttyS2 IRQ
+DISPLAY_TTY_CPU=1        # display.service + ttyS1 IRQ
+KLIPPER_MCU_RPI_CPU=2    # klipper-mcu.service (host-MCU tasks)
+KLIPPER_MCU_TTY_CPU=3    # klipper.service + ttyS0 IRQ
 
 # --- basic env checks (warn-only) --------------------------------------------
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -78,7 +78,7 @@ pin_irq() {
   if [ -w "$p/smp_affinity_list" ]; then
     echo "$cpu" > "$p/smp_affinity_list" 2>/dev/null || true
   else
-    # falls back to mask (unsafe for cpu>=32; list path preferred)
+    # list path preferred; mask unsafe for cpu>=32
     printf '%x\n' "$((1<<cpu))" > "$p/smp_affinity" 2>/dev/null || true
   fi
   log "Pinned IRQ $irq to CPU $cpu"
@@ -120,11 +120,42 @@ ps_line() {
   ps -o pid,cls,rtprio,psr,cmd -p "$pid" --no-headers 2>/dev/null | sed 's/^/    /'
 }
 
+# Ensure a unit runs as SCHED_FIFO:prio even if the process set its own (-r/49)
+promote_unit_fifo() {
+  unit="$1"; prio="$2"
+  systemctl set-property --runtime "$unit" CPUSchedulingPolicy=fifo CPUSchedulingPriority="$prio" >/dev/null 2>&1 || true
+  pid=$(systemctl show -p MainPID --value "$unit" 2>/dev/null || echo 0)
+  [ "${pid:-0}" -gt 0 ] || return 0
+  n=0
+  while [ "$n" -lt 10 ]; do
+    chrt -a -f -p "$prio" "$pid" >/dev/null 2>&1 || true
+    cls=$(ps -o cls= -p "$pid" 2>/dev/null | xargs || true)
+    rt=$(ps -o rtprio= -p "$pid" 2>/dev/null | xargs || true)
+    if [ "$cls" = "FF" ] && [ "$rt" = "$prio" ]; then
+      log "$unit(pid=$pid) -> FIFO $prio (all threads)"
+      return 0
+    fi
+    sleep 0.3
+    n=$((n+1))
+  done
+  log "WARN: $unit(pid=$pid) did not reach FIFO $prio (last: cls=$cls rtprio=$rt)"
+  return 0
+}
+
+# Promote a threaded IRQ kernel thread (irq/<N>-*) to FIFO priority
+# Handles kernel threads displayed as "[irq/<N>-...]" by stripping brackets.
 chrt_irq_thread() {
   irq="$1"; prio="$2"; t=0
   [ -n "$irq" ] || return 0
   while [ "$t" -lt 20 ]; do
-    pid=$(ps -eo pid=,cmd= 2>/dev/null | awk -v irq="$irq" '$0 ~ ("^irq/" irq "-"){print $1; exit}')
+    pid=$(
+      ps -eLo pid=,cmd= 2>/dev/null | awk -v irq="$irq" '
+        {
+          pid=$1; $1=""; sub(/^[ \t]+/,""); name=$0;
+          gsub(/^\[/,"",name); gsub(/\]$/,"",name);
+          if (name ~ ("^irq/" irq "-")) { print pid; exit }
+        }'
+    )
     if [ -n "$pid" ]; then
       chrt -f -p "$prio" "$pid" >/dev/null 2>&1 || true
       log "IRQ thread irq/$irq -> FIFO $prio (pid=$pid)"
@@ -181,21 +212,12 @@ ionice_idle_unit display.service
 
 # --- RT budget ---------------------------------------------------------------
 sysctl -w kernel.sched_rt_runtime_us=-1 >/dev/null 2>&1 || \
+  echo -1 > /proc/sys/kernel/sched_rt_runtime_us 2>/dev/null || \
   log "WARN: failed to set sched_rt_runtime_us"
 
-# --- promote Klippy + host MCU to SCHED_FIFO 60 ------------------------------
-pid_k=$(systemctl show -p MainPID --value klipper.service 2>/dev/null || echo 0)
-pid_m=$(systemctl show -p MainPID --value klipper-mcu.service 2>/dev/null || echo 0)
-
-if [ "${pid_m:-0}" -gt 0 ]; then
-  chrt -f -p 60 "$pid_m" >/dev/null 2>&1 || log "ERROR: chrt klipper-mcu(pid=$pid_m) FAILED"
-  log "klipper-mcu -> FIFO 60"
-fi
-
-if [ "${pid_k:-0}" -gt 0 ]; then
-  chrt -f -p 60 "$pid_k" >/dev/null 2>&1 || log "ERROR: chrt klipper(pid=$pid_k) FAILED"
-  log "klipper -> FIFO 60"
-fi
+# --- promote Klippy + host MCU to SCHED_FIFO 60 (sticky) ---------------------
+promote_unit_fifo klipper-mcu.service 60
+promote_unit_fifo klipper.service     60
 
 # --- bump ttyS0 IRQ thread if present ----------------------------------------
 if [ -n "${IRQ_S0:-}" ]; then
@@ -228,7 +250,7 @@ if [ -n "${IRQ_S2:-}" ]; then
   log "ttyS2 irq=$IRQ_S2 aff=$aff2"
 fi
 
-log "klipper-mcu:$(ps_line "$pid_m" || true)"
-log "klipper:    $(ps_line "$pid_k" || true)"
+log "klipper-mcu:$(ps_line "$(systemctl show -p MainPID --value klipper-mcu.service 2>/dev/null || echo 0)" || true)"
+log "klipper:    $(ps_line "$(systemctl show -p MainPID --value klipper.service 2>/dev/null || echo 0)" || true)"
 log "done (IRQs: ttyS0:${IRQ_S0:-?} ttyS1:${IRQ_S1:-?} ttyS2:${IRQ_S2:-?})"
 exit 0
