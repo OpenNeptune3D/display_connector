@@ -1,152 +1,234 @@
 #!/bin/sh
-# Robust, idempotent affinity & RT setup for Klipper stack
-# - Pins UART IRQs dynamically by name (ttyS0/ttyS1/ttyS2)
-# - Sets cpuset (AllowedCPUs=) with fallback to taskset
-# - Applies priorities without editing vendor unit files
-# - Waits for services and IRQs to exist to avoid boot races
-# - Keeps Klippy non-RT (nice -5); only klipper-mcu is RT
+# Klipper stack affinity + PREEMPT_RT realtime setup (no unit file edits on disk)
 
 set -eu
 
-# CPU layout (0-based):
-MISC_CPU=0             # ttyS2 IRQ (linux console serial) + Moonraker + Mobileraker + mjpg-streamer + power_monitor
-DISPLAY_TTY_CPU=1      # ttyS1 IRQ (display serial) + display.service
-KLIPPER_MCU_RPI_CPU=2  # klipper-mcu.service (Linux host MCU: ADXL/LED)
-KLIPPER_MCU_TTY_CPU=3  # ttyS0 IRQ (klipper serial) + klipper.service
+TAG="affinity-setup"
+log() {
+  logger -t "$TAG" -- "$@"
+  printf '%s: %s\n' "$TAG" "$*"
+}
 
-# --- wait helpers ----------------------------------------------------------
-wait_active() { # wait until unit is active and has a PID (max ~15s)
+# Re-exec as root if needed
+if [ "$(id -u)" != 0 ]; then
+  exec sudo -E -- "$0" "$@"
+fi
+
+# --- CPU layout (0-based) ----------------------------------------------------
+MISC_CPU=0
+DISPLAY_TTY_CPU=1
+KLIPPER_MCU_RPI_CPU=2
+KLIPPER_MCU_TTY_CPU=3
+
+# --- basic env checks (warn-only) --------------------------------------------
+have() { command -v "$1" >/dev/null 2>&1; }
+if systemctl is-active --quiet irqbalance.service 2>/dev/null; then
+  log "WARN: irqbalance is active; it may override IRQ affinities."
+fi
+for bin in systemctl awk ps sed chrt taskset ionice renice stty sysctl logger; do
+  have "$bin" || log "WARN: missing helper '$bin' (some steps may be skipped)."
+done
+
+cpu_online() {
+  c="$1"
+  [ -d "/sys/devices/system/cpu/cpu$c" ] || return 1
+  onf="/sys/devices/system/cpu/cpu$c/online"
+  [ ! -f "$onf" ] || [ "$(cat "$onf" 2>/dev/null || echo 1)" = "1" ]
+}
+
+# --- helpers -----------------------------------------------------------------
+wait_active() { # wait until systemd unit is active and has a MainPID
   unit="$1"; t=0
-  while [ $t -lt 30 ]; do
+  while [ "$t" -lt 30 ]; do
     state=$(systemctl is-active "$unit" 2>/dev/null || true)
     pid=$(systemctl show -p MainPID --value "$unit" 2>/dev/null || echo 0)
     if [ "$state" = "active" ] && [ "${pid:-0}" -gt 0 ]; then
       return 0
     fi
-    sleep 0.5; t=$((t+1))
+    sleep 0.5
+    t=$((t+1))
   done
+  log "WARN: $unit did not become active in time; continuing."
   return 0
 }
 
-wait_irq_present() { # wait until /proc/interrupts shows the device (max ~10s)
+wait_irq_present() { # wait until /proc/interrupts shows the device name
   dev="$1"; t=0
-  while [ $t -lt 20 ]; do
+  while [ "$t" -lt 20 ]; do
     irq=$(awk -v n="$dev" '$NF==n{gsub(":", "", $1); print $1; exit}' /proc/interrupts)
     [ -n "$irq" ] && return 0
-    sleep 0.5; t=$((t+1))
+    sleep 0.5
+    t=$((t+1))
   done
+  log "WARN: IRQ for $dev not found; continuing."
   return 0
 }
 
-# --- helpers ---------------------------------------------------------------
-irq_for() { awk -v name="$1" '$NF==name{gsub(":", "", $1); print $1; exit}' /proc/interrupts; }
+irq_for() {
+  awk -v name="$1" '$NF==name{gsub(":", "", $1); print $1; exit}' /proc/interrupts
+}
 
 pin_irq() {
   irq="$1"; cpu="$2"
   [ -n "$irq" ] || return 0
-  path="/proc/irq/$irq"
-  [ -d "$path" ] || return 0
-  if [ -w "$path/smp_affinity_list" ]; then
-    echo "$cpu" > "$path/smp_affinity_list" || true
+  p="/proc/irq/$irq"
+  [ -d "$p" ] || return 0
+  cpu_online "$cpu" || { log "WARN: CPU $cpu not online; skip pin IRQ $irq"; return 0; }
+
+  if [ -w "$p/smp_affinity_list" ]; then
+    echo "$cpu" > "$p/smp_affinity_list" 2>/dev/null || true
   else
-    printf '%x\n' $((1<<cpu)) > "$path/smp_affinity" || true
+    # falls back to mask (unsafe for cpu>=32; list path preferred)
+    printf '%x\n' "$((1<<cpu))" > "$p/smp_affinity" 2>/dev/null || true
   fi
+  log "Pinned IRQ $irq to CPU $cpu"
 }
 
-# Set CPUs for a unit: prefer cpuset (AllowedCPUs), else taskset the PID
 set_unit_cpus() {
   unit="$1"; cpus="$2"
+  cpu_online "$cpus" || { log "WARN: CPU $cpus not online; skip $unit CPU pin"; return 0; }
   if systemctl set-property --runtime "$unit" "AllowedCPUs=$cpus" >/dev/null 2>&1; then
-    return 0
+    log "AllowedCPUs for $unit -> $cpus"
+  else
+    pid=$(systemctl show -p MainPID --value "$unit" 2>/dev/null || echo 0)
+    if [ "${pid:-0}" -gt 0 ] && taskset -pc "$cpus" "$pid" >/dev/null 2>&1; then
+      log "taskset fallback for $unit(pid=$pid) -> $cpus"
+    fi
   fi
-  pid="$(systemctl show -p MainPID --value "$unit" 2>/dev/null || true)"
-  [ -n "$pid" ] && [ "$pid" -gt 0 ] && taskset -pc "$cpus" "$pid" >/dev/null 2>&1 || true
 }
 
 renice_unit() {
   unit="$1"; niceval="$2"
-  pid="$(systemctl show -p MainPID --value "$unit" 2>/dev/null || true)"
-  [ -n "$pid" ] && [ "$pid" -gt 0 ] && renice -n "$niceval" -p "$pid" >/dev/null 2>&1 || true
-}
-
-ionice_unit_idle() {
-  unit="$1"
-  pid="$(systemctl show -p MainPID --value "$unit" 2>/dev/null || true)"
-  [ -n "$pid" ] && [ "$pid" -gt 0 ] && ionice -c3 -p "$pid" >/dev/null 2>&1 || true
-}
-
-chrt_fifo_unit() {
-  unit="$1"; prio="$2"
-  pid="$(systemctl show -p MainPID --value "$unit" 2>/dev/null || true)"
-  [ -n "$pid" ] && [ "$pid" -gt 0 ] && chrt -f -p "$prio" "$pid" >/dev/null 2>&1 || true
-}
-
-# Make an IRQ kernel thread (irq/<N>-*) SCHED_FIFO (only if threaded IRQs exist)
-chrt_irq_thread() {
-  irq="$1"; prio="$2"; t=0
-  [ -n "$irq" ] || return 0
-  while [ $t -lt 20 ]; do
-    pid=$(ps -eo pid=,cmd= 2>/dev/null | awk -v irq="$irq" '$0 ~ ("^irq/" irq "-"){print $1; exit}')
-    if [ -n "$pid" ]; then
-      chrt -f -p "$prio" "$pid" >/dev/null 2>&1 || true
-      return 0
-    fi
-    sleep 0.5; t=$((t+1))
-  done
+  pid=$(systemctl show -p MainPID --value "$unit" 2>/dev/null || echo 0)
+  if [ "${pid:-0}" -gt 0 ] && renice -n "$niceval" -p "$pid" >/dev/null 2>&1; then
+    log "renice $unit(pid=$pid) -> $niceval"
+  fi
   return 0
 }
 
-# --- prep (avoid RT starvation; allow but bound RT CPU) -------------------
-# Use default throttling (950ms of RT per 1s period) to keep softirqs healthy.
-sysctl -w kernel.sched_rt_runtime_us=950000 >/dev/null 2>&1 || true
+ionice_idle_unit() {
+  unit="$1"
+  pid=$(systemctl show -p MainPID --value "$unit" 2>/dev/null || echo 0)
+  if [ "${pid:-0}" -gt 0 ] && ionice -c3 -p "$pid" >/dev/null 2>&1; then
+    log "ionice idle $unit(pid=$pid)"
+  fi
+  return 0
+}
 
-# Ensure services and IRQs exist (handle boot races)
-wait_active klipper.service
-wait_active klipper-mcu.service
-wait_active moonraker.service
-wait_active display.service
+ps_line() {
+  pid="$1"
+  ps -o pid,cls,rtprio,psr,cmd -p "$pid" --no-headers 2>/dev/null | sed 's/^/    /'
+}
+
+chrt_irq_thread() {
+  irq="$1"; prio="$2"; t=0
+  [ -n "$irq" ] || return 0
+  while [ "$t" -lt 20 ]; do
+    pid=$(ps -eo pid=,cmd= 2>/dev/null | awk -v irq="$irq" '$0 ~ ("^irq/" irq "-"){print $1; exit}')
+    if [ -n "$pid" ]; then
+      chrt -f -p "$prio" "$pid" >/dev/null 2>&1 || true
+      log "IRQ thread irq/$irq -> FIFO $prio (pid=$pid)"
+      return 0
+    fi
+    sleep 0.5
+    t=$((t+1))
+  done
+  log "WARN: did not find threaded IRQ for $irq"
+  return 0
+}
+
+# --- wait for services -------------------------------------------------------
+for u in klipper.service klipper-mcu.service moonraker.service display.service; do
+  wait_active "$u"
+done
+
+# --- wait for UART IRQs ------------------------------------------------------
 wait_irq_present ttyS0
 wait_irq_present ttyS1
 wait_irq_present ttyS2
 
-# --- IRQ pinning (by name, dynamic) ---------------------------------------
+# --- pin UART IRQs -----------------------------------------------------------
 IRQ_S0="$(irq_for ttyS0 || true)"
 IRQ_S1="$(irq_for ttyS1 || true)"
 IRQ_S2="$(irq_for ttyS2 || true)"
-[ -n "${IRQ_S0:-}" ] && pin_irq "$IRQ_S0" "$KLIPPER_MCU_TTY_CPU"   # klippy consumer lives here
+
+[ -n "${IRQ_S0:-}" ] && pin_irq "$IRQ_S0" "$KLIPPER_MCU_TTY_CPU"
 [ -n "${IRQ_S1:-}" ] && pin_irq "$IRQ_S1" "$DISPLAY_TTY_CPU"
 [ -n "${IRQ_S2:-}" ] && pin_irq "$IRQ_S2" "$MISC_CPU"
 
-# --- Serial tuning for MCU UART (leave speed to Klippy) -------------------
-command -v setserial >/dev/null 2>&1 && setserial /dev/ttyS0 low_latency || true
-# If RTS/CTS is actually wired end-to-end, change '-crtscts' to 'crtscts'
-stty -F /dev/ttyS0 cs8 -parenb -cstopb -ixon -ixoff -crtscts -icanon -echo -echoe -echok -echoctl -echoke -iexten -inlcr -igncr -icrnl -opost -hupcl min 1 time 0 || true
-
-# --- Unit cpus & priorities ------------------------------------------------
+# --- place units on CPUs -----------------------------------------------------
 set_unit_cpus klipper-mcu.service "$KLIPPER_MCU_RPI_CPU"
 set_unit_cpus klipper.service     "$KLIPPER_MCU_TTY_CPU"
 set_unit_cpus display.service     "$DISPLAY_TTY_CPU"
 set_unit_cpus moonraker.service   "$MISC_CPU"
-set_unit_cpus mjpg-streamer-webcam1.service "$MISC_CPU"
-set_unit_cpus mobileraker.service "$MISC_CPU"
-set_unit_cpus power_monitor.service "$MISC_CPU"
+set_unit_cpus mjpg-streamer-webcam1.service "$MISC_CPU" || true
+set_unit_cpus mobileraker.service            "$MISC_CPU" || true
+set_unit_cpus power_monitor.service          "$MISC_CPU" || true
 
-# Make display gentle (no bursty quotas; tiny CPU weight; low prio + idle IO)
-systemctl set-property --runtime display.service CPUQuota= >/dev/null 2>&1 || true
-systemctl set-property --runtime display.service CPUWeight=1 >/dev/null 2>&1 || true
-renice_unit       display.service 19
-ionice_unit_idle  display.service
+# --- serial tuning for /dev/ttyS0 -------------------------------------------
+if [ -e /dev/ttyS0 ]; then
+  have setserial && setserial /dev/ttyS0 low_latency || true
+  stty -F /dev/ttyS0 cs8 -parenb -cstopb -ixon -ixoff -crtscts \
+       -icanon -echo -echoe -echok -echoctl -echoke -iexten \
+       -inlcr -igncr -icrnl -opost -hupcl min 1 time 0 || true
+else
+  log "WARN: /dev/ttyS0 not present; skipped stty/setserial"
+fi
 
-# Realtime/priority tuning
-# Host MCU process should be RT to service GPIO/ADXL timing
-chrt_fifo_unit    klipper-mcu.service 60
+# --- make display gentle -----------------------------------------------------
+renice_unit      display.service 19
+ionice_idle_unit display.service
 
-# Klippy stays non-RT; slight scheduling preference
-renice_unit       klipper.service -5
+# --- RT budget ---------------------------------------------------------------
+sysctl -w kernel.sched_rt_runtime_us=-1 >/dev/null 2>&1 || \
+  log "WARN: failed to set sched_rt_runtime_us"
 
-# If UART IRQs are threaded (PREEMPT_RT or 'threadirqs'), prefer the ttyS0 IRQ thread slightly above host-MCU
-if [ -n "${IRQ_S0:-}" ] && ps -eLo cmd | awk -v i="$IRQ_S0" '$0 ~ ("^irq/" i "-"){found=1} END{exit found?0:1}'; then
+# --- promote Klippy + host MCU to SCHED_FIFO 60 ------------------------------
+pid_k=$(systemctl show -p MainPID --value klipper.service 2>/dev/null || echo 0)
+pid_m=$(systemctl show -p MainPID --value klipper-mcu.service 2>/dev/null || echo 0)
+
+if [ "${pid_m:-0}" -gt 0 ]; then
+  chrt -f -p 60 "$pid_m" >/dev/null 2>&1 || log "ERROR: chrt klipper-mcu(pid=$pid_m) FAILED"
+  log "klipper-mcu -> FIFO 60"
+fi
+
+if [ "${pid_k:-0}" -gt 0 ]; then
+  chrt -f -p 60 "$pid_k" >/dev/null 2>&1 || log "ERROR: chrt klipper(pid=$pid_k) FAILED"
+  log "klipper -> FIFO 60"
+fi
+
+# --- bump ttyS0 IRQ thread if present ----------------------------------------
+if [ -n "${IRQ_S0:-}" ]; then
   chrt_irq_thread "$IRQ_S0" 70
 fi
 
+# --- summary -----------------------------------------------------------------
+if [ -n "${IRQ_S0:-}" ]; then
+  aff0=$(
+    cat "/proc/irq/$IRQ_S0/smp_affinity_list" 2>/dev/null ||
+    cat "/proc/irq/$IRQ_S0/smp_affinity" 2>/dev/null ||
+    echo "?"
+  )
+  log "ttyS0 irq=$IRQ_S0 aff=$aff0"
+fi
+if [ -n "${IRQ_S1:-}" ]; then
+  aff1=$(
+    cat "/proc/irq/$IRQ_S1/smp_affinity_list" 2>/dev/null ||
+    cat "/proc/irq/$IRQ_S1/smp_affinity" 2>/dev/null ||
+    echo "?"
+  )
+  log "ttyS1 irq=$IRQ_S1 aff=$aff1"
+fi
+if [ -n "${IRQ_S2:-}" ]; then
+  aff2=$(
+    cat "/proc/irq/$IRQ_S2/smp_affinity_list" 2>/dev/null ||
+    cat "/proc/irq/$IRQ_S2/smp_affinity" 2>/dev/null ||
+    echo "?"
+  )
+  log "ttyS2 irq=$IRQ_S2 aff=$aff2"
+fi
+
+log "klipper-mcu:$(ps_line "$pid_m" || true)"
+log "klipper:    $(ps_line "$pid_k" || true)"
+log "done (IRQs: ttyS0:${IRQ_S0:-?} ttyS1:${IRQ_S1:-?} ttyS2:${IRQ_S2:-?})"
 exit 0
