@@ -1,0 +1,64 @@
+[Unit]
+Description=OpenNept4une TouchScreen Display Service
+After=klipper.service klipper-mcu.service moonraker.service
+Wants=klipper.service moonraker.service
+Documentation=https://github.com/OpenNeptune3D/display_connector
+
+[Service]
+Type=simple
+User=mks
+Group=mks
+WorkingDirectory=/home/mks/display_connector
+ExecStartPre=/bin/sleep 10
+ExecStart=/home/mks/display_connector/venv/bin/python /home/mks/display_connector/display.py
+
+# Restart configuration
+Restart=on-failure
+RestartSec=10
+StartLimitBurst=5
+
+# Timeouts
+TimeoutStartSec=60
+TimeoutStopSec=30
+WatchdogSec=60
+KillMode=mixed
+SendSIGKILL=yes
+FinalKillSignal=SIGKILL
+RemainAfterExit=no
+
+# Memory limits - 256M max, throttle at 200M
+MemoryMax=256M
+MemoryHigh=200M
+MemorySwapMax=128M
+
+# CPU limits - 25% of one core maximum
+CPUQuota=
+CPUWeight=1
+Nice=19
+
+# I/O priority
+IOSchedulingClass=idle
+IOSchedulingPriority=7
+
+# Ensure it can’t grab RT
+LimitRTPRIO=0
+
+# Task/thread limits
+TasksMax=200
+
+# File descriptor limits
+LimitNOFILE=1024
+
+# Security hardening
+ProtectSystem=full
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
