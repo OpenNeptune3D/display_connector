@@ -6,3 +6,4 @@ pillow
 watchdog
 numpy
 aiohttp
+systemd-python
