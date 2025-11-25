@@ -25,6 +25,7 @@ def signal_handler(signum, frame):
     try:
         loop.call_soon_threadsafe(loop.stop)
     except Exception:
+        logger.exception("Unexpected error signal_handler")
         pass
 
 # Register signal handlers
@@ -1260,6 +1261,7 @@ class DisplayController:
                 self.pending_reqs.pop(message["id"], None)
             raise
         except Exception:
+            logger.exception("Unexpected error _send_moonraker_request")
             await self.close()
             raise
 
@@ -1732,6 +1734,7 @@ class DisplayController:
                 try:
                     thumbnail.close()
                 except Exception:
+                    logger.exception("Unexpected error fetch_and_parse_thumbnail")
                     pass
 
     async def handle_status_update(self, new_data, data_mapping=None):
