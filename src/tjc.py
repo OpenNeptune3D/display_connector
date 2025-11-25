@@ -99,11 +99,13 @@ class TJCProtocol(NextionProtocol):
                     self.buffer = self.buffer[expected_length + 1:]
                     return full_message[:-3], was_keyboard_input
 
-            message = self._extract_varied_length_packet()
-            if message is None:
-                return None, was_keyboard_input
+            # ⬇⬇ FIX STARTS HERE
+            msg, kb_from_var = self._extract_varied_length_packet()
+            if msg is None:
+                # propagate any keyboard flag we might have gotten
+                return None, was_keyboard_input or kb_from_var
 
-            self.dropped_buffer += message + self.EOL
+            self.dropped_buffer += msg + self.EOL
             return self._extract_packet()
 
         self.buffer = self.buffer[expected_length:]
