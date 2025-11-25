@@ -205,7 +205,7 @@ class TJCClient(Nextion):
             try:
                 await self._command("page main", attempts=1)
                 # if you track this, keep it in sync
-                setattr(self, "current_page", "main")
+                self.current_page = "main"
                 await asyncio.sleep(0.25)  # small settle so HMI swaps pages
             except CommandTimeout:
                 pass
