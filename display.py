@@ -2,7 +2,6 @@ import json
 import sys
 import logging
 import pathlib
-import requests
 import re
 import os
 import os.path
@@ -13,24 +12,6 @@ import traceback
 import aiohttp
 import signal
 import systemd.daemon
-
-# Global flag for graceful shutdown
-_shutdown_requested = False
-
-def signal_handler(signum, frame):
-    global _shutdown_requested
-    _shutdown_requested = True
-    log = logging.getLogger(__name__)
-    log.info(f"Received signal {signum}, initiating graceful shutdown...")
-    try:
-        loop.call_soon_threadsafe(loop.stop)
-    except Exception:
-        logger.exception("Unexpected error signal_handler")
-        pass
-
-# Register signal handlers
-signal.signal(signal.SIGTERM, signal_handler)
-signal.signal(signal.SIGINT, signal_handler)
 
 from PIL import Image
 
@@ -82,6 +63,31 @@ from src.mapping import (
     format_time,
 )
 from src.colors import BACKGROUND_SUCCESS, BACKGROUND_WARNING
+
+# Global flag for graceful shutdown
+_shutdown_requested = False
+
+# Create module-level logger and event loop early
+logger = logging.getLogger(__name__)
+loop = asyncio.get_event_loop()
+
+def signal_handler(signum, frame):
+    global _shutdown_requested
+    _shutdown_requested = True
+    logger.info("Received signal %s, initiating graceful shutdown...", signum)
+    try:
+        loop.call_soon_threadsafe(loop.stop)
+    except Exception:
+        # Log the error instead of swallowing it silently
+        logger.exception("Unexpected error in signal_handler")
+
+# Register signal handlers
+signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
+
+# Register signal handlers
+signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
 
 log_file = os.path.expanduser("~/printer_data/logs/display_connector.log")
 logger = logging.getLogger(__name__)
