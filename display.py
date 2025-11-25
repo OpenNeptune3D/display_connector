@@ -122,23 +122,30 @@ TRANSITION_PAGES = [PAGE_OVERLAY_LOADING]
 
 SUPPORTED_PRINTERS = [MODEL_N4_REGULAR, MODEL_N4_PRO, MODEL_N4_PLUS, MODEL_N4_MAX]
 
-
 def get_communicator(display, model) -> DisplayCommunicator:
-    if display == "openneptune":
+    # Normalize display name to avoid None/whitespace/case issues
+    disp = (display or "").strip().lower()
+
+    # OpenNeptune variants
+    if disp == "openneptune":
         if model == MODEL_CUSTOM:
             return CustomDisplayCommunicator
         elif model in MODELS_N4:
             return OpenNeptune4DisplayCommunicator
         elif model in MODELS_N3:
             return OpenNeptune3DisplayCommunicator
-    else:
-        if model == MODEL_CUSTOM:
-            return CustomDisplayCommunicator
-        elif model in MODELS_N4:
-            return ElegooNeptune4DisplayCommunicator
-        elif model in MODELS_N3:
-            return ElegooNeptune3DisplayCommunicator
 
+    # Default to Elegoo-compatible communicators for everything else (including empty/None)
+    if model == MODEL_CUSTOM:
+        return CustomDisplayCommunicator
+    elif model in MODELS_N4:
+        return ElegooNeptune4DisplayCommunicator
+    elif model in MODELS_N3:
+        return ElegooNeptune3DisplayCommunicator
+
+    # Final fallback to avoid returning None (log to make debugging easier)
+    logger.warning(f"get_communicator: unknown display '{display}' or unsupported model '{model}', falling back to ElegooNeptune4DisplayCommunicator")
+    return ElegooNeptune4DisplayCommunicator
 
 SOCKET_LIMIT = 20 * 1024 * 1024
 
@@ -189,8 +196,8 @@ class DisplayController:
 
         self._cached_printer_model = None
         self._display_initialized = False
-
-        display_type = self.config.safe_get("general", "display_type")
+        
+        display_type = self.config.safe_get("general", "display_type", "elegoo")
         printer_model = self.get_printer_model() 
         self.display = get_communicator(display_type, printer_model)(
             logger,
