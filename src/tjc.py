@@ -99,7 +99,6 @@ class TJCProtocol(NextionProtocol):
                     self.buffer = self.buffer[expected_length + 1:]
                     return full_message[:-3], was_keyboard_input
 
-            # ⬇⬇ FIX STARTS HERE
             msg, kb_from_var = self._extract_varied_length_packet()
             if msg is None:
                 # propagate any keyboard flag we might have gotten
@@ -170,13 +169,13 @@ class TJCClient(Nextion):
         try:
             try:
                 await self._connection.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                # Non-fatal: log and continue trying to reconnect
+                self.logger.debug("Error while closing connection during reconnect: %r", exc)
             await self.connect()
         finally:
             # connect() will clear this when it succeeds; make sure we don't get stuck
             self.is_reconnecting = False
-
 
     async def connect(self) -> None:
         """Connect to the device with a quick, safe re-init."""
@@ -184,13 +183,17 @@ class TJCClient(Nextion):
             await self._try_connect_on_different_baudrates()
             for method in ("reset_input_buffer", "reset_output_buffer", "flush"):
                 try:
-                    fn = getattr(self._connection, method)
+                    fn = getattr(self._connection, method, None)
                     if callable(fn):
                         r = fn()
                         if asyncio.iscoroutine(r):
                             await r
-                except Exception:
-                    pass
+                except Exception as exc:
+                    self.logger.debug(
+                        "Error while calling %s() on connection during setup: %r",
+                        method,
+                        exc,
+                    )
             # Make panel return detailed acks if it's awake
             try:
                 await self._command("bkcmd=3", attempts=1)
