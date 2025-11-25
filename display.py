@@ -1478,10 +1478,10 @@ class DisplayController:
                 if "position_max" in new_data["config"]["stepper_x"]:
                     max_x = int(float(new_data["config"]["stepper_x"]["position_max"])) #added conversion from float numbers, stripping decimal part
             if "stepper_y" in new_data["config"]:
-                if "position_max" in new_data["config"]["stepper_x"]:
+                if "position_max" in new_data["config"]["stepper_y"]:
                     max_y = int(float(new_data["config"]["stepper_y"]["position_max"])) #added conversion from float numbers, stripping decimal part
             if "stepper_z" in new_data["config"]:
-                if "position_max" in new_data["config"]["stepper_x"]:
+                if "position_max" in new_data["config"]["stepper_z"]:
                     max_z = int(float(new_data["config"]["stepper_z"]["position_max"])) #added conversion from float numbers, stripping decimal part
 
             if max_x > 0 and max_y > 0 and max_z > 0:
