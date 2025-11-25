@@ -12,7 +12,7 @@ MODELS_N3 = [MODEL_N3_REGULAR, MODEL_N3_PRO, MODEL_N3_PLUS, MODEL_N3_MAX]
 class ElegooNeptune3DisplayMapper:
     def __init__(self):
         # Dynamically import ElegooDisplayMapper to avoid circular import
-        importlib.import_module("src.elegoo_display").ElegooDisplayMapper
+        #ElegooDisplayMapper = importlib.import_module("src.elegoo_display").ElegooDisplayMapper
         super().__init__()
 
 
@@ -27,7 +27,7 @@ class ElegooNeptune3DisplayCommunicator:
         timeout: int = 5,
     ) -> None:
         # Dynamically import ElegooDisplayCommunicator to avoid circular import
-        importlib.import_module("src.elegoo_display").ElegooDisplayCommunicator
+        #ElegooDisplayCommunicator = importlib.import_module("src.elegoo_display").ElegooDisplayCommunicator
         super().__init__(logger, model, port, event_handler, baudrate, timeout)
         self.mapper = ElegooNeptune3DisplayMapper()
 
@@ -35,7 +35,7 @@ class ElegooNeptune3DisplayCommunicator:
 class OpenNeptune3DisplayMapper:
     def __init__(self):
         # Dynamically import OpenNeptuneDisplayMapper to avoid circular import
-        importlib.import_module("src.openneptune_display").OpenNeptuneDisplayMapper
+        #OpenNeptuneDisplayMapper = importlib.import_module("src.openneptune_display").OpenNeptuneDisplayMapper
         super().__init__()
 
 
@@ -50,6 +50,6 @@ class OpenNeptune3DisplayCommunicator:
         timeout: int = 5,
     ) -> None:
         # Dynamically import OpenNeptuneDisplayCommunicator to avoid circular import
-        importlib.import_module("src.openneptune_display").OpenNeptuneDisplayCommunicator
+        #OpenNeptuneDisplayCommunicator = importlib.import_module("src.openneptune_display").OpenNeptuneDisplayCommunicator
         super().__init__(logger, model, port, event_handler, baudrate, timeout)
         self.mapper = ElegooNeptune3DisplayMapper()
