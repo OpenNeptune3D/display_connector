@@ -15,7 +15,7 @@ class CustomDisplayCommunicator:
     ) -> None:
         # Dynamically import ElegooDisplayCommunicator and ElegooDisplayMapper to avoid circular import
         importlib.import_module('src.elegoo_display').ElegooDisplayCommunicator
-        importlib.import_module('src.elegoo_display').ElegooDisplayMapper
+        ElegooDisplayMapper = importlib.import_module('src.elegoo_display').ElegooDisplayMapper
         
         super().__init__(logger, model, port, event_handler, baudrate, timeout)
         self.mapper = ElegooDisplayMapper()
