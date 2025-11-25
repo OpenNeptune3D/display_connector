@@ -67,23 +67,21 @@ from src.colors import BACKGROUND_SUCCESS, BACKGROUND_WARNING
 # Global flag for graceful shutdown
 _shutdown_requested = False
 
-# Create module-level logger and event loop early
+# Create module-level logger and placeholder for event loop
 logger = logging.getLogger(__name__)
-loop = asyncio.get_event_loop()
+loop = None
 
 def signal_handler(signum, frame):
-    global _shutdown_requested
+    global _shutdown_requested, loop
     _shutdown_requested = True
     logger.info("Received signal %s, initiating graceful shutdown...", signum)
     try:
-        loop.call_soon_threadsafe(loop.stop)
+        # Only attempt to stop the loop if it exists and is running.
+        if loop is not None and loop.is_running():
+            loop.call_soon_threadsafe(loop.stop)
     except Exception:
         # Log the error instead of swallowing it silently
         logger.exception("Unexpected error in signal_handler")
-
-# Register signal handlers
-signal.signal(signal.SIGTERM, signal_handler)
-signal.signal(signal.SIGINT, signal_handler)
 
 # Register signal handlers
 signal.signal(signal.SIGTERM, signal_handler)
