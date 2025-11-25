@@ -75,44 +75,44 @@ class TJCProtocol(NextionProtocol):
             return self._extract_fixed_length_packet(expected_length)
         return self._extract_varied_length_packet()
 
-    def _extract_fixed_length_packet(self, expected_length):
-        """Extract a fixed-length packet from the buffer."""
-        if len(self.buffer) < expected_length:
-            if len(self.buffer) == 5 and self.buffer[0] in {0x71, 0x72}:
-                expected_length = 5
+        def _extract_fixed_length_packet(self, expected_length):
+            """Extract a fixed-length packet from the buffer."""
+            if len(self.buffer) < expected_length:
+                if len(self.buffer) == 5 and self.buffer[0] in {0x71, 0x72}:
+                    expected_length = 5
+                else:
+                    return None, False
+    
+            full_message = self.buffer[:expected_length]
+    
+            if full_message[0] == 0x71 and not full_message.endswith(self.EOL):
+                full_message += self.EOL
+                full_message = b"\x72" + full_message[1:]
+                was_keyboard_input = True
             else:
-                return None, False
-
-        full_message = self.buffer[:expected_length]
-
-        if full_message[0] == 0x71 and not full_message.endswith(self.EOL):
-            full_message += self.EOL
-            full_message = b"\x72" + full_message[1:]
-            was_keyboard_input = True
-        else:
-            was_keyboard_input = False
-
-        if not full_message.endswith(self.EOL):
-            if full_message[0] == 0x65:
-                full_message = self.buffer[:expected_length + 1]
-                if full_message.endswith(self.EOL):
-                    self.buffer = self.buffer[expected_length + 1:]
-                    return full_message[:-3], was_keyboard_input
-
-            msg, kb_from_var = self._extract_varied_length_packet()
-            if msg is None:
-                # propagate any keyboard flag we might have gotten
-                return None, was_keyboard_input or kb_from_var
-
-            self.dropped_buffer += msg + self.EOL
-            return self._extract_packet()
-
-        self.buffer = self.buffer[expected_length:]
-        if self.buffer.startswith(self.EOL):
-            self.buffer = self.buffer[3:]
-            was_keyboard_input = False
-
-        return full_message[:-3], was_keyboard_input
+                was_keyboard_input = False
+    
+            if not full_message.endswith(self.EOL):
+                if full_message[0] == 0x65:
+                    full_message = self.buffer[:expected_length + 1]
+                    if full_message.endswith(self.EOL):
+                        self.buffer = self.buffer[expected_length + 1:]
+                        return full_message[:-3], was_keyboard_input
+    
+                msg, kb_from_var = self._extract_varied_length_packet()
+                if msg is None:
+                    # propagate any keyboard flag we might have gotten
+                    return None, was_keyboard_input or kb_from_var
+    
+                self.dropped_buffer += msg + self.EOL
+                return self._extract_packet()
+    
+            self.buffer = self.buffer[expected_length:]
+            if self.buffer.startswith(self.EOL):
+                self.buffer = self.buffer[3:]
+                was_keyboard_input = False
+    
+            return full_message[:-3], was_keyboard_input
 
     def _extract_varied_length_packet(self):
         """Extract a varied-length packet from the buffer."""
