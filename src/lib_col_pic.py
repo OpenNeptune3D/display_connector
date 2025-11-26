@@ -3,7 +3,7 @@
 # The ElegooNeptuneThumbnails plugin is released under the terms of the AGPLv3 or higher.
 from threading import Lock
 import numpy as np
-from PIL import Image, ImageColor
+from PIL import ImageColor
 
 thumbnail_lock = Lock()
 
@@ -81,7 +81,7 @@ def ColPicEncode(fromcolor16, picw, pich, outputdata: bytearray, outputmaxtsize,
     unique_colors, counts = np.unique(fromcolor16, return_counts=True)
     Listu16 = np.array([U16HEAD() for _ in range(len(unique_colors))])
 
-    for i, (color, qty) in enumerate(zip(unique_colors, counts)):
+    for i, (color, qty) in enumerate(zip(unique_colors, counts, strict=True)):
         Listu16[i].colo16 = color
         Listu16[i].qty = qty
         Listu16[i].A0 = (color >> 11) & 31

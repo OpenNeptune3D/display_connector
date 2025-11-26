@@ -42,19 +42,8 @@ class DisplayCommunicator:
             self.logger.error(f"Failed to connect to display: {str(e)}")
             raise
 
-    async def write(self, data, timeout=None, blocked_key=None):
-        # Fast path: decide blocking under lock
-        async with self._write_lock:
-            # If someone else is blocking, queue this command
-            if self.blocked_by and self.blocked_by != blocked_key:
-                self.blocked_buffer.append((data, timeout))
-                return
-
-            # Claim the block if caller provided a key and none is set
-            if blocked_key and not self.blocked_by:
-                self.blocked_by = blocked_key
-
-        # Execute the command outside the lock
+    async def _execute_command(self, data, timeout=None):
+        """Execute a display command directly without queueing logic."""
         try:
             effective_timeout = self.timeout if timeout is None else timeout
             await asyncio.wait_for(
@@ -70,7 +59,6 @@ class DisplayCommunicator:
                 await self.display.reconnect()
             except Exception as e:
                 self.logger.warning(f"Display reconnect failed after timeout: {e}")
-            return
         except CommandFailed as e:
             # Expected if we target a control not present on the current page
             self.logger.debug(
@@ -79,24 +67,49 @@ class DisplayCommunicator:
         except Exception as e:
             # Any other error: log and continue
             self.logger.warning(f"Unexpected error writing to display: {e}")
+
+    async def write(self, data, timeout=None, blocked_key=None):
+        # Fast path: decide blocking under lock
+        async with self._write_lock:
+            # If someone else is blocking, queue this command
+            if self.blocked_by and self.blocked_by != blocked_key:
+                self.blocked_buffer.append((data, timeout))
+                return
+
+            # Claim the block if caller provided a key and none is set
+            if blocked_key and not self.blocked_by:
+                self.blocked_by = blocked_key
+
+        # Execute the command outside the lock
+        try:
+            await self._execute_command(data, timeout)
         finally:
             # If this was a blocking op, release block and send the next queued command (if any)
             if blocked_key:
                 await self.unblock(blocked_key)
 
     async def unblock(self, blocked_key):
-        next_item = None
+        # Release the block if we're the current blocker
         async with self._write_lock:
-            if self.blocked_by == blocked_key:
-                self.blocked_by = None
-                if self.blocked_buffer:
-                    # pop the next queued command (FIFO)
-                    next_item = self.blocked_buffer.pop(0)
+            if self.blocked_by != blocked_key:
+                return
+            self.blocked_by = None
 
-        # Send the next queued command outside the lock to avoid deadlocks
-        if next_item is not None and self.blocked_by is None:
-            data, timeout = next_item
-            await self.write(data, timeout=timeout)
+        # Process all queued commands iteratively (avoids recursion)
+        while True:
+            next_item = None
+            async with self._write_lock:
+                # Only process queue if no one else has claimed the block
+                if not self.blocked_by and self.blocked_buffer:
+                    next_item = self.blocked_buffer.pop(0)
+                else:
+                    break
+
+            if next_item:
+                data, timeout = next_item
+                await self._execute_command(data, timeout)
+            else:
+                break
         
     def get_device_name(self):
         return self.model

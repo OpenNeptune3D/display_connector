@@ -2,7 +2,6 @@ import json
 import sys
 import logging
 import pathlib
-import requests
 import re
 import os
 import os.path
@@ -13,23 +12,6 @@ import traceback
 import aiohttp
 import signal
 import systemd.daemon
-
-# Global flag for graceful shutdown
-_shutdown_requested = False
-
-def signal_handler(signum, frame):
-    global _shutdown_requested
-    _shutdown_requested = True
-    log = logging.getLogger(__name__)
-    log.info(f"Received signal {signum}, initiating graceful shutdown...")
-    try:
-        loop.call_soon_threadsafe(loop.stop)
-    except Exception:
-        pass
-
-# Register signal handlers
-signal.signal(signal.SIGTERM, signal_handler)
-signal.signal(signal.SIGINT, signal_handler)
 
 from PIL import Image
 
@@ -81,6 +63,29 @@ from src.mapping import (
     format_time,
 )
 from src.colors import BACKGROUND_SUCCESS, BACKGROUND_WARNING
+
+# Global flag for graceful shutdown
+_shutdown_requested = False
+
+# Create module-level logger and placeholder for event loop
+logger = logging.getLogger(__name__)
+loop = None
+
+def signal_handler(signum, frame):
+    global _shutdown_requested, loop
+    _shutdown_requested = True
+    logger.info("Received signal %s, initiating graceful shutdown...", signum)
+    try:
+        # Only attempt to stop the loop if it exists and is running.
+        if loop is not None and loop.is_running():
+            loop.call_soon_threadsafe(loop.stop)
+    except Exception:
+        # Log the error instead of swallowing it silently
+        logger.exception("Unexpected error in signal_handler")
+
+# Register signal handlers
+signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
 
 log_file = os.path.expanduser("~/printer_data/logs/display_connector.log")
 logger = logging.getLogger(__name__)
@@ -1260,6 +1265,7 @@ class DisplayController:
                 self.pending_reqs.pop(message["id"], None)
             raise
         except Exception:
+            logger.exception("Unexpected error _send_moonraker_request")
             await self.close()
             raise
 
@@ -1472,10 +1478,10 @@ class DisplayController:
                 if "position_max" in new_data["config"]["stepper_x"]:
                     max_x = int(float(new_data["config"]["stepper_x"]["position_max"])) #added conversion from float numbers, stripping decimal part
             if "stepper_y" in new_data["config"]:
-                if "position_max" in new_data["config"]["stepper_x"]:
+                if "position_max" in new_data["config"]["stepper_y"]:
                     max_y = int(float(new_data["config"]["stepper_y"]["position_max"])) #added conversion from float numbers, stripping decimal part
             if "stepper_z" in new_data["config"]:
-                if "position_max" in new_data["config"]["stepper_x"]:
+                if "position_max" in new_data["config"]["stepper_z"]:
                     max_z = int(float(new_data["config"]["stepper_z"]["position_max"])) #added conversion from float numbers, stripping decimal part
 
             if max_x > 0 and max_y > 0 and max_z > 0:
@@ -1732,6 +1738,7 @@ class DisplayController:
                 try:
                     thumbnail.close()
                 except Exception:
+                    logger.exception("Unexpected error fetch_and_parse_thumbnail")
                     pass
 
     async def handle_status_update(self, new_data, data_mapping=None):

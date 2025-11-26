@@ -10,19 +10,25 @@ def test_is_event():
     assert protocol.is_event(b"\x71") is False
     assert protocol.is_event(b"\x72") is True
 
-
 def test_data_received_touch_event():
     m = MagicMock()
     protocol = TJCProtocol(m)
     protocol.data_received(b"\x65\xF1\x02\xFF\xFF\xFF\xFF")
     m.assert_called_once_with(b"\x65\xF1\x02")
 
-
 def test_data_received_number():
     m = MagicMock()
     protocol = TJCProtocol(m)
-    protocol.data_received(b"\x72\xF1\x02\x03\x05\x04\xFF\xFF\xFF")
-    m.assert_called_once_with(b"\x72\xF1\x02\x03\x05\x04")
+    # 0x72 packet: 1 header + 2 (page, component) + 2 (value) + 3 EOL = 8 bytes total
+    protocol.data_received(b"\x72\xF1\x02\x03\x05\xFF\xFF\xFF")
+    # Handler should see the message without the EOL bytes
+    m.assert_called_once_with(b"\x72\xF1\x02\x03\x05")
+
+#def test_data_received_number():
+#    m = MagicMock()
+#    protocol = TJCProtocol(m)
+#    protocol.data_received(b"\x72\xF1\x02\x03\x05\x04\xFF\xFF\xFF")
+#    m.assert_called_once_with(b"\x72\xF1\x02\x03\x05\x04")
 
 
 def test_data_received_number_broken():
