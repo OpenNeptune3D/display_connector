@@ -667,17 +667,17 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
         await self.draw_screw_level_info_at("12,140,100,20", screw_levels["rear left"])
 
         if "center right" in screw_levels:
-            await self.write('xstr 12,220,100,30,1,65535,10665,1,1,1,"center\\rright"')
+            await self.write('xstr 180,200,80,30,1,65535,10665,1,1,1,"center\\r right"')
             await self.draw_screw_level_info_at(
-                "170,240,100,20", screw_levels["center right"]
+                "170,240,100,35", screw_levels["center right"].replace(" ", "\\r")
             )
         if "center left" in screw_levels:
-            await self.write('xstr 12,120,100,20,1,65535,10665,1,1,1,"center\\rleft"')
+            await self.write('xstr 12,200,80,30,1,65535,10665,1,1,1,"center\\r  left"')
             await self.draw_screw_level_info_at(
-                "12,240,100,20", screw_levels["center left"]
+                "12,240,100,35", screw_levels["center left"].replace(" ", "\\r")
             )
 
-        await self.write('xstr 96,215,100,50,1,65535,15319,1,1,1,"Retry"')
+        await self.write('xstr 90,215,100,50,1,65535,15319,1,1,1,"Retry"')
 
     async def draw_screw_level_info_at(self, position, level):
         if level == "base":
