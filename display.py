@@ -265,6 +265,7 @@ class DisplayController:
         self.bed_leveling_counts = [0, 0]
         self.bed_leveling_probed_count = 0
         self.bed_leveling_last_position = None
+        self._rapid_scan_mode = False
 
         self.klipper_restart_event = asyncio.Event()
 
@@ -2055,11 +2056,27 @@ class DisplayController:
             self.bed_leveling_counts = [x_count, y_count]
         elif response.startswith("// Adapted mesh bounds"):
             self.bed_leveling_probed_count = 0
-            current_page = await self._get_current_page()  
+            self.bed_leveling_last_position = None
+            self._rapid_scan_mode = False
+            self._bed_leveling_complete = False
+            # Reset leveling_mode for KAMP during printing (not manual full bed level)
+            if self.current_state in ("printing", "paused"):
+                self.leveling_mode = None
+            current_page = await self._get_current_page()
             if current_page != PAGE_PRINTING_KAMP:
                 self._loop.create_task(self._navigate_to_page(PAGE_PRINTING_KAMP, clear_history=True))
+        elif "Beginning rapid surface scan" in response:
+            # Rapid scan mode (Eddy/Cartographer) - skip per-point visualization
+            self._rapid_scan_mode = True
+            logger.info("Rapid scan mode detected - using simplified visualization")
+            self._loop.create_task(
+                self.display.update_kamp_text("Scanning bed surface...")
+            )
         elif response.startswith("// probe at"):
-            current_page = await self._get_current_page()  
+            # Skip all probe messages during rapid scan to avoid overwhelming the system
+            if self._rapid_scan_mode:
+                return
+            current_page = await self._get_current_page()
             if current_page != PAGE_PRINTING_KAMP:
                 # We are not leveling, likely response came from manual probe e.g. from console,
                 # Skip updating the state, otherwise it messes up bed leveling screen when printing
@@ -2090,12 +2107,26 @@ class DisplayController:
                 )
 
         elif response.startswith("// Mesh Bed Leveling Complete"):
+            # If rapid scan mode was active, draw all boxes green now
+            if self._rapid_scan_mode and self.bed_leveling_counts[0] > 0:
+                total_probes = self.bed_leveling_counts[0] * self.bed_leveling_counts[1]
+                for i in range(total_probes):
+                    self._loop.create_task(
+                        self.display.draw_kamp_box_index(i, BACKGROUND_SUCCESS, self.bed_leveling_counts)
+                    )
+                self._loop.create_task(
+                    self.display.update_kamp_text(f"Complete ({total_probes}/{total_probes})")
+                )
+
             self.bed_leveling_probed_count = 0
             self.bed_leveling_counts = self.full_bed_leveling_counts
-            current_page = await self._get_current_page()  
+            self._rapid_scan_mode = False
+
+            current_page = await self._get_current_page()
             if current_page == PAGE_PRINTING_KAMP:
                 self._bed_leveling_complete = True
-                if self.leveling_mode == "full_bed":
+                # Only show bed mesh final for manual full bed leveling (not during printing)
+                if self.leveling_mode == "full_bed" and self.current_state not in ("printing", "paused"):
                     self._loop.create_task(self.display.show_bed_mesh_final())
                 else:
                     self._loop.create_task(self._handle_bed_leveling_complete())
