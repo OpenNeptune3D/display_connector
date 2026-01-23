@@ -2057,8 +2057,9 @@ class DisplayController:
         elif response.startswith("// Adapted mesh bounds"):
             self.bed_leveling_probed_count = 0
             self.bed_leveling_last_position = None
-            self._rapid_scan_mode = False
             self._bed_leveling_complete = False
+            # Don't reset _rapid_scan_mode here - it may have been set by
+            # "Beginning rapid surface scan" which can come before or after this message
             # Reset leveling_mode for KAMP during printing (not manual full bed level)
             if self.current_state in ("printing", "paused"):
                 self.leveling_mode = None
@@ -2117,12 +2118,24 @@ class DisplayController:
                 )
 
         elif response.startswith("// Mesh Bed Leveling Complete"):
-            # If rapid scan mode was active, show completion (no boxes for rapid scan probes
-            # since they don't report probe counts)
+            # If rapid scan mode was active, show completion
+            # Draw boxes if we received probe counts (some probes send both rapid scan AND counts)
             if self._rapid_scan_mode:
-                self._loop.create_task(
-                    self.display.update_kamp_text("Scan complete!")
-                )
+                if self.bed_leveling_counts[0] > 0:
+                    # We have counts, draw all boxes green
+                    total_probes = self.bed_leveling_counts[0] * self.bed_leveling_counts[1]
+                    for i in range(total_probes):
+                        self._loop.create_task(
+                            self.display.draw_kamp_box_index(i, BACKGROUND_SUCCESS, self.bed_leveling_counts)
+                        )
+                    self._loop.create_task(
+                        self.display.update_kamp_text(f"Scan complete! ({total_probes} points)")
+                    )
+                else:
+                    # No counts available, just show completion text
+                    self._loop.create_task(
+                        self.display.update_kamp_text("Scan complete!")
+                    )
 
             self.bed_leveling_probed_count = 0
             self.bed_leveling_counts = self.full_bed_leveling_counts
