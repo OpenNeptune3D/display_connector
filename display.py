@@ -2117,7 +2117,7 @@ class DisplayController:
                     )
                 )
 
-        elif response.startswith("// Mesh Bed Leveling Complete"):
+        elif response.startswith("// Mesh Bed Leveling Complete") or "[cartographer] Collecting samples along the scanning path completed" in response:
             # If rapid scan mode was active, show completion
             # Draw boxes if we received probe counts (some probes send both rapid scan AND counts)
             if self._rapid_scan_mode:
