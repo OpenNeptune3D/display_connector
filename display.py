@@ -105,6 +105,7 @@ config_file = os.path.expanduser("~/printer_data/config/display_connector.cfg")
 
 PRINTING_PAGES = [
     PAGE_PRINTING,
+    PAGE_PRINTING_KAMP,
     PAGE_PRINTING_FILAMENT,
     PAGE_PRINTING_PAUSE,
     PAGE_PRINTING_STOP,
