@@ -2066,7 +2066,7 @@ class DisplayController:
             current_page = await self._get_current_page()
             if current_page != PAGE_PRINTING_KAMP:
                 self._loop.create_task(self._navigate_to_page(PAGE_PRINTING_KAMP, clear_history=True))
-        elif "Beginning rapid surface scan" in response:
+        elif "Beginning rapid surface scan" in response or "[cartographer] Starting stream" in response:
             # Rapid scan mode (Eddy/Cartographer/Beacon) - these probes don't send
             # "Adapted mesh bounds" or "probe at" messages, so we handle everything here
             self._rapid_scan_mode = True
