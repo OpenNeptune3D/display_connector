@@ -2066,9 +2066,19 @@ class DisplayController:
             if current_page != PAGE_PRINTING_KAMP:
                 self._loop.create_task(self._navigate_to_page(PAGE_PRINTING_KAMP, clear_history=True))
         elif "Beginning rapid surface scan" in response:
-            # Rapid scan mode (Eddy/Cartographer) - skip per-point visualization
+            # Rapid scan mode (Eddy/Cartographer/Beacon) - these probes don't send
+            # "Adapted mesh bounds" or "probe at" messages, so we handle everything here
             self._rapid_scan_mode = True
+            self.bed_leveling_probed_count = 0
+            self.bed_leveling_last_position = None
+            self._bed_leveling_complete = False
+            # Reset leveling_mode for KAMP during printing
+            if self.current_state in ("printing", "paused"):
+                self.leveling_mode = None
             logger.info("Rapid scan mode detected - using simplified visualization")
+            current_page = await self._get_current_page()
+            if current_page != PAGE_PRINTING_KAMP:
+                self._loop.create_task(self._navigate_to_page(PAGE_PRINTING_KAMP, clear_history=True))
             self._loop.create_task(
                 self.display.update_kamp_text("Scanning bed surface...")
             )
@@ -2107,15 +2117,11 @@ class DisplayController:
                 )
 
         elif response.startswith("// Mesh Bed Leveling Complete"):
-            # If rapid scan mode was active, draw all boxes green now
-            if self._rapid_scan_mode and self.bed_leveling_counts[0] > 0:
-                total_probes = self.bed_leveling_counts[0] * self.bed_leveling_counts[1]
-                for i in range(total_probes):
-                    self._loop.create_task(
-                        self.display.draw_kamp_box_index(i, BACKGROUND_SUCCESS, self.bed_leveling_counts)
-                    )
+            # If rapid scan mode was active, show completion (no boxes for rapid scan probes
+            # since they don't report probe counts)
+            if self._rapid_scan_mode:
                 self._loop.create_task(
-                    self.display.update_kamp_text(f"Complete ({total_probes}/{total_probes})")
+                    self.display.update_kamp_text("Scan complete!")
                 )
 
             self.bed_leveling_probed_count = 0
