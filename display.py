@@ -2028,7 +2028,7 @@ class DisplayController:
 
     async def handle_gcode_response(self, response):
         if self.leveling_mode == "screw":
-            if "probe at" in response:
+            if "probe: at" in response:
                 self.screw_probe_count += 1
                 self._loop.create_task(
                     self.display.update_screw_level_description(
@@ -2068,7 +2068,7 @@ class DisplayController:
                 self._loop.create_task(self._navigate_to_page(PAGE_PRINTING_KAMP, clear_history=True))
         elif "Beginning rapid surface scan" in response or "[cartographer] Starting stream" in response:
             # Rapid scan mode (Eddy/Cartographer/Beacon) - these probes don't send
-            # "Adapted mesh bounds" or "probe at" messages, so we handle everything here
+            # "Adapted mesh bounds" or "probe: at" messages, so we handle everything here
             self._rapid_scan_mode = True
             self.bed_leveling_probed_count = 0
             self.bed_leveling_last_position = None
@@ -2083,7 +2083,7 @@ class DisplayController:
             self._loop.create_task(
                 self.display.update_kamp_text("Scanning bed surface...")
             )
-        elif response.startswith("// probe at"):
+        elif response.startswith("// probe: at"):
             # Skip all probe messages during rapid scan to avoid overwhelming the system
             if self._rapid_scan_mode:
                 return
