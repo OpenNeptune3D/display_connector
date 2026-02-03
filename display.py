@@ -446,8 +446,9 @@ class DisplayController:
             await self.display.draw_initial_zprobe_leveling(self.z_probe_step, self.z_probe_distance)
             self._loop.create_task(self.handle_zprobe_leveling())
         elif current_page == PAGE_PRINTING_KAMP:
-            await self.display.draw_kamp_page(self.bed_leveling_counts)
-            return
+            if not self._rapid_scan_mode:                                                       
+                await self.display.draw_kamp_page(self.bed_leveling_counts)
+            return  
 
         await self.display.special_page_handling(current_page)
 
@@ -2066,7 +2067,7 @@ class DisplayController:
             current_page = await self._get_current_page()
             if current_page != PAGE_PRINTING_KAMP:
                 self._loop.create_task(self._navigate_to_page(PAGE_PRINTING_KAMP, clear_history=True))
-        elif "Beginning rapid surface scan" in response or "[cartographer] Starting stream" in response:
+        elif "Beginning rapid surface scan" in response or "Touch home at" in response:
             # Rapid scan mode (Eddy/Cartographer/Beacon) - these probes don't send
             # "Adapted mesh bounds" or "probe: at" messages, so we handle everything here
             self._rapid_scan_mode = True
@@ -2117,25 +2118,13 @@ class DisplayController:
                     )
                 )
 
-        elif response.startswith("// Mesh Bed Leveling Complete") or "[cartographer] Collecting samples along the scanning path completed" in response:
+        elif response.startswith("// Mesh Bed Leveling Complete") or "Collecting samples along the scanning path completed" in response:
             # If rapid scan mode was active, show completion
             # Draw boxes if we received probe counts (some probes send both rapid scan AND counts)
             if self._rapid_scan_mode:
-                if self.bed_leveling_counts[0] > 0:
-                    # We have counts, draw all boxes green
-                    total_probes = self.bed_leveling_counts[0] * self.bed_leveling_counts[1]
-                    for i in range(total_probes):
-                        self._loop.create_task(
-                            self.display.draw_kamp_box_index(i, BACKGROUND_SUCCESS, self.bed_leveling_counts)
-                        )
-                    self._loop.create_task(
-                        self.display.update_kamp_text(f"Scan complete! ({total_probes} points)")
-                    )
-                else:
-                    # No counts available, just show completion text
-                    self._loop.create_task(
-                        self.display.update_kamp_text("Scan complete!")
-                    )
+                self._loop.create_task(
+                    self.display.update_kamp_text("Scan complete!")
+                )
 
             self.bed_leveling_probed_count = 0
             self.bed_leveling_counts = self.full_bed_leveling_counts
