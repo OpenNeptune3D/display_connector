@@ -711,9 +711,10 @@ class DisplayController:
                     selected = self.dir_contents[(self.files_page * 5) + index]
                     is_dir = selected["type"] == "dir"
                     file_path = selected["path"]
+                    if is_dir:
+                        self.current_dir = file_path
+                        self.files_page = 0
                 if is_dir:
-                    self.current_dir = file_path
-                    self.files_page = 0
                     await self._load_files()
                 else:
                     async with self._filename_lock:
@@ -996,7 +997,7 @@ class DisplayController:
             {"path": "/".join(["gcodes", self.current_dir])},
         )
         dir_info = data["result"]
-        self.dir_contents = []
+        
         dirs = []
         for item in dir_info["dirs"]:
             if not item["dirname"].startswith("."):
@@ -1026,15 +1027,18 @@ class DisplayController:
             sort_folders_first = self.config["files"].getboolean(
                 "sort_folders_first", fallback=True
             )
-        if sort_folders_first:
-            self.dir_contents = self.sort_dir_contents(dirs) + self.sort_dir_contents(
-                files
-            )
-        else:
-            self.dir_contents = self.sort_dir_contents(dirs + files)
-        await self.display.show_files_page(
-            self.current_dir, self.dir_contents, self.files_page
-        )
+        
+        # Update shared state under lock
+        async with self._files_lock:
+            if sort_folders_first:
+                self.dir_contents = self.sort_dir_contents(dirs) + self.sort_dir_contents(files)
+            else:
+                self.dir_contents = self.sort_dir_contents(dirs + files)
+            current_dir = self.current_dir
+            dir_contents = self.dir_contents
+            files_page = self.files_page
+        
+        await self.display.show_files_page(current_dir, dir_contents, files_page)
 
     def _page_id(self, page):
         return self.display.mapper.map_page(page)
@@ -1055,17 +1059,22 @@ class DisplayController:
             history_len = len(self.history)
             if history_len <= 1:
                 logger.debug("Already at the main page.")
-                return  # ← This is the ONLY place this message should appear
+                return
             
             # Get current page WITHOUT releasing lock (safe - no await)
             current_page = self.history[-1] if self.history else None
         
-        # PHASE 2: Handle FILES special case (outside lock)
-        if current_page == PAGE_FILES and self.current_dir != "":
-            self.current_dir = "/".join(self.current_dir.split("/")[:-1])
-            self.files_page = 0
-            await self._load_files()  # I/O outside lock
-            return
+        # PHASE 2: Handle FILES special case (with proper file locking)
+        if current_page == PAGE_FILES:
+            should_load_files = False
+            async with self._files_lock:
+                if self.current_dir != "":
+                    self.current_dir = "/".join(self.current_dir.split("/")[:-1])
+                    self.files_page = 0
+                    should_load_files = True
+            if should_load_files:
+                await self._load_files()
+                return
         
         # PHASE 3: Pop history and determine navigation (under lock - DATA ONLY)
         back_page = None
@@ -1088,15 +1097,12 @@ class DisplayController:
                 # Map page under lock (it's just a dict lookup - fast and safe)
                 mapped_page = self.display.mapper.map_page(back_page)
         
-        # PHASE 4: Navigate (outside lock - I/O)
-        if back_page is None or mapped_page is None:
-            logger.debug("No valid page to navigate back to.")
-            return
+        # PHASE 4: Perform navigation (outside lock - I/O)
+        if back_page is not None and mapped_page is not None:
+            await self.display.navigate_to(mapped_page)
+            logger.debug(f"Navigating back to {back_page}")
         
-        await self.display.navigate_to(mapped_page)
-        logger.debug(f"Navigating back to {back_page}")
-        
-        # PHASE 5: Special page handling (outside lock - I/O)
+        # PHASE 5: Handle special page logic (outside lock - may do I/O)
         try:
             await self.special_page_handling(back_page)
         except Exception as e:
@@ -1245,6 +1251,9 @@ class DisplayController:
                 await asyncio.sleep(60)
 
     async def _send_moonraker_request(self, method, params=None):
+        if not self.connected or self.writer is None:
+            raise ConnectionError("Not connected to Moonraker")
+        
         if params is None:
             params = {}
         message = self._make_rpc_msg(method, **params)
@@ -1263,13 +1272,22 @@ class DisplayController:
             self.writer.write(data)
             await self.writer.drain()
             return await asyncio.wait_for(fut, timeout=self.REQUEST_TIMEOUT)
-        except asyncio.TimeoutError:
+        except asyncio.CancelledError:
+            # External cancellation (shutdown, reconnect) - always propagate
+            async with self.pending_reqs_lock:
+                self.pending_reqs.pop(message["id"], None)
+            raise
+        except (asyncio.TimeoutError, ConnectionError):
+            # Timeout or connection closed - let caller handle reconnect logic
             async with self.pending_reqs_lock:
                 self.pending_reqs.pop(message["id"], None)
             raise
         except Exception:
+            # Unexpected error - log but don't call close() here
+            # Let the error propagate; caller/listen() handles reconnection
             logger.exception("Unexpected error _send_moonraker_request")
-            await self.close()
+            async with self.pending_reqs_lock:
+                self.pending_reqs.pop(message["id"], None)
             raise
 
     def _find_ips(self, network):
@@ -1437,21 +1455,23 @@ class DisplayController:
         errors_remaining: int = 10
         while not reader.at_eof():
             if self.klipper_restart_event.is_set():
-                await self._attempt_reconnect()
                 self.klipper_restart_event.clear()
+                await self._attempt_reconnect()
+                return  # Exit - new connection started
             try:
                 data = await reader.readuntil(b"\x03")
                 decoded = data[:-1].decode(encoding="utf-8")
                 item = json.loads(decoded)
             except (ConnectionError, asyncio.IncompleteReadError):
                 await self._attempt_reconnect()
-                break
+                return  # Exit - new connection started
             except asyncio.CancelledError:
                 raise
             except Exception:
                 errors_remaining -= 1
                 if not errors_remaining or not self.connected:
                     await self._attempt_reconnect()
+                    return  # Exit - new connection started
                 continue
             errors_remaining = 10
             if "id" in item:
@@ -1460,10 +1480,10 @@ class DisplayController:
                     if request_data is not None:
                         fut, _ = request_data
                         fut.set_result(item)
-            elif item["method"] == "notify_status_update":
+            elif item.get("method") == "notify_status_update":
                 await self.handle_status_update(item["params"][0])
-            elif item["method"] == "notify_gcode_response":
-                await self.handle_gcode_response(item["params"][0])  
+            elif item.get("method") == "notify_gcode_response":
+                await self.handle_gcode_response(item["params"][0])
         logger.info("Unix Socket Disconnection from _process_stream()")
         await self.close()
 
@@ -1501,29 +1521,25 @@ class DisplayController:
     async def _attempt_reconnect(self):
         async with self._reconnect_lock:
             if self._is_reconnecting:
-                logger.debug("Reconnection already in progress, skipping...")
                 return
             self._is_reconnecting = True
             try:
-                # Close existing connection
-                if self.writer and not self.writer.is_closing():
+                # Cancel existing listen task first
+                if self._listen_task and not self._listen_task.done():
+                    self._listen_task.cancel()
                     try:
-                        self.writer.close()
-                        await self.writer.wait_closed()
-                    except Exception as e:
-                        logger.debug(f"Error closing writer: {e}")
+                        await self._listen_task
+                    except asyncio.CancelledError:
+                        pass
                 
-                self.connected = False
+                # Close existing connection
+                await self.close()
                 
                 logger.info("Attempting to reconnect to Moonraker...")
                 await asyncio.sleep(1)
                 
-                # Clear the listening flag if it's stuck
                 self._is_listening = False
-
-                # Allow thread pool recreation
                 self.resources.allow_new_pool()
-                
                 self.start_listening()
             finally:
                 self._is_reconnecting = False
@@ -1862,19 +1878,28 @@ class DisplayController:
                     # Load thumbnail if needed
                     if should_load_thumbnail and thumbnail_filename:
                         logger.info(f"Loading thumbnail for {thumbnail_filename} on printing page")
-                        if self._thumbnail_task and not self._thumbnail_task.done():
-                            self._thumbnail_task.cancel()
+                        
+                        # Cancel existing task under lock
+                        task_to_cancel = None
+                        async with self._filename_lock:
+                            if self._thumbnail_task and not self._thumbnail_task.done():
+                                task_to_cancel = self._thumbnail_task
+                                self._thumbnail_task = None
+                        
+                        if task_to_cancel:
+                            task_to_cancel.cancel()
                             try:
-                                await self._thumbnail_task
+                                await task_to_cancel
                             except asyncio.CancelledError:
                                 pass
                         
-                        self._thumbnail_task = self._loop.create_task(
-                            self.load_thumbnail_for_page(
-                                thumbnail_filename,
-                                thumbnail_page_id
+                        async with self._filename_lock:
+                            self._thumbnail_task = self._loop.create_task(
+                                self.load_thumbnail_for_page(
+                                    thumbnail_filename,
+                                    thumbnail_page_id
+                                )
                             )
-                        )
                         
                 elif state_to_process == "complete":
                     if current_page is None or current_page != PAGE_PRINTING_COMPLETE:
@@ -1992,13 +2017,22 @@ class DisplayController:
             return
         self.connected = False
         
-        # Cancel the process_stream task if it's still running
+        # Cancel all pending request futures
+        async with self.pending_reqs_lock:
+            for req_id, (fut, _) in list(self.pending_reqs.items()):
+                if not fut.done():
+                    fut.set_exception(ConnectionError("Connection closed"))
+            self.pending_reqs.clear()
+        
+        # Cancel process_stream task only if it's not the current task (avoid self-cancellation)
+        current_task = asyncio.current_task()
         if self._process_stream_task and not self._process_stream_task.done():
-            self._process_stream_task.cancel()
-            try:
-                await self._process_stream_task
-            except asyncio.CancelledError:
-                pass
+            if self._process_stream_task is not current_task:
+                self._process_stream_task.cancel()
+                try:
+                    await self._process_stream_task
+                except asyncio.CancelledError:
+                    pass
         
         if self.writer:
             self.writer.close()
