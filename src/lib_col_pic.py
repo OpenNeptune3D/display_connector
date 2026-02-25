@@ -120,7 +120,6 @@ def _colpic_encode(
     # Unconditional defensive copy: palette reduction mutates `pixels`.
     pixels = np.array(fromcolor16, dtype=np.uint16, copy=True)
 
-    dotsqty = picw * pich
     colorsmax = min(colorsmax, 1024)
 
     unique_colors, counts = np.unique(pixels, return_counts=True)
