@@ -58,9 +58,8 @@ echo "Reloading systemd units..."
 sudo systemctl daemon-reload
 
 # --- Enable + start services -------------------------------------------------
-echo "Enabling and starting affinity.service..."
+echo "Enabling affinity.service..."
 sudo systemctl enable affinity.service
-sudo systemctl start affinity.service
 
 echo "Enabling and starting display.service..."
 sudo systemctl enable display.service
