@@ -105,6 +105,7 @@ config_file = os.path.expanduser("~/printer_data/config/display_connector.cfg")
 
 PRINTING_PAGES = [
     PAGE_PRINTING,
+    PAGE_PRINTING_KAMP,
     PAGE_PRINTING_FILAMENT,
     PAGE_PRINTING_PAUSE,
     PAGE_PRINTING_STOP,
@@ -264,6 +265,7 @@ class DisplayController:
         self.bed_leveling_counts = [0, 0]
         self.bed_leveling_probed_count = 0
         self.bed_leveling_last_position = None
+        self._rapid_scan_mode = False
 
         self.klipper_restart_event = asyncio.Event()
 
@@ -444,8 +446,9 @@ class DisplayController:
             await self.display.draw_initial_zprobe_leveling(self.z_probe_step, self.z_probe_distance)
             self._loop.create_task(self.handle_zprobe_leveling())
         elif current_page == PAGE_PRINTING_KAMP:
-            await self.display.draw_kamp_page(self.bed_leveling_counts)
-            return
+            if not self._rapid_scan_mode:                                                       
+                await self.display.draw_kamp_page(self.bed_leveling_counts)
+            return  
 
         await self.display.special_page_handling(current_page)
 
@@ -708,9 +711,10 @@ class DisplayController:
                     selected = self.dir_contents[(self.files_page * 5) + index]
                     is_dir = selected["type"] == "dir"
                     file_path = selected["path"]
+                    if is_dir:
+                        self.current_dir = file_path
+                        self.files_page = 0
                 if is_dir:
-                    self.current_dir = file_path
-                    self.files_page = 0
                     await self._load_files()
                 else:
                     async with self._filename_lock:
@@ -993,7 +997,7 @@ class DisplayController:
             {"path": "/".join(["gcodes", self.current_dir])},
         )
         dir_info = data["result"]
-        self.dir_contents = []
+        
         dirs = []
         for item in dir_info["dirs"]:
             if not item["dirname"].startswith("."):
@@ -1023,15 +1027,18 @@ class DisplayController:
             sort_folders_first = self.config["files"].getboolean(
                 "sort_folders_first", fallback=True
             )
-        if sort_folders_first:
-            self.dir_contents = self.sort_dir_contents(dirs) + self.sort_dir_contents(
-                files
-            )
-        else:
-            self.dir_contents = self.sort_dir_contents(dirs + files)
-        await self.display.show_files_page(
-            self.current_dir, self.dir_contents, self.files_page
-        )
+        
+        # Update shared state under lock
+        async with self._files_lock:
+            if sort_folders_first:
+                self.dir_contents = self.sort_dir_contents(dirs) + self.sort_dir_contents(files)
+            else:
+                self.dir_contents = self.sort_dir_contents(dirs + files)
+            current_dir = self.current_dir
+            dir_contents = self.dir_contents
+            files_page = self.files_page
+        
+        await self.display.show_files_page(current_dir, dir_contents, files_page)
 
     def _page_id(self, page):
         return self.display.mapper.map_page(page)
@@ -1052,17 +1059,22 @@ class DisplayController:
             history_len = len(self.history)
             if history_len <= 1:
                 logger.debug("Already at the main page.")
-                return  # ← This is the ONLY place this message should appear
+                return
             
             # Get current page WITHOUT releasing lock (safe - no await)
             current_page = self.history[-1] if self.history else None
         
-        # PHASE 2: Handle FILES special case (outside lock)
-        if current_page == PAGE_FILES and self.current_dir != "":
-            self.current_dir = "/".join(self.current_dir.split("/")[:-1])
-            self.files_page = 0
-            await self._load_files()  # I/O outside lock
-            return
+        # PHASE 2: Handle FILES special case (with proper file locking)
+        if current_page == PAGE_FILES:
+            should_load_files = False
+            async with self._files_lock:
+                if self.current_dir != "":
+                    self.current_dir = "/".join(self.current_dir.split("/")[:-1])
+                    self.files_page = 0
+                    should_load_files = True
+            if should_load_files:
+                await self._load_files()
+                return
         
         # PHASE 3: Pop history and determine navigation (under lock - DATA ONLY)
         back_page = None
@@ -1085,15 +1097,12 @@ class DisplayController:
                 # Map page under lock (it's just a dict lookup - fast and safe)
                 mapped_page = self.display.mapper.map_page(back_page)
         
-        # PHASE 4: Navigate (outside lock - I/O)
-        if back_page is None or mapped_page is None:
-            logger.debug("No valid page to navigate back to.")
-            return
+        # PHASE 4: Perform navigation (outside lock - I/O)
+        if back_page is not None and mapped_page is not None:
+            await self.display.navigate_to(mapped_page)
+            logger.debug(f"Navigating back to {back_page}")
         
-        await self.display.navigate_to(mapped_page)
-        logger.debug(f"Navigating back to {back_page}")
-        
-        # PHASE 5: Special page handling (outside lock - I/O)
+        # PHASE 5: Handle special page logic (outside lock - may do I/O)
         try:
             await self.special_page_handling(back_page)
         except Exception as e:
@@ -1197,9 +1206,10 @@ class DisplayController:
                     logger.error(f"Unexpected response format from printer.objects.subscribe: {ret}")
                     raise Exception("Failed to subscribe to printer objects")
                 
-                # Now wait for the process_stream task to complete (keeps connection alive)
+                # Keep the listen task alive while the Moonraker stream reader runs.
                 logger.info("Listen task now monitoring connection...")
                 if self._process_stream_task:
+                    await asyncio.shield(self._process_stream_task)
                     logger.info("Process stream task completed, connection closed")
                 else:
                     logger.warning("No process_stream task found!")
@@ -1242,6 +1252,9 @@ class DisplayController:
                 await asyncio.sleep(60)
 
     async def _send_moonraker_request(self, method, params=None):
+        if not self.connected or self.writer is None:
+            raise ConnectionError("Not connected to Moonraker")
+        
         if params is None:
             params = {}
         message = self._make_rpc_msg(method, **params)
@@ -1260,13 +1273,22 @@ class DisplayController:
             self.writer.write(data)
             await self.writer.drain()
             return await asyncio.wait_for(fut, timeout=self.REQUEST_TIMEOUT)
-        except asyncio.TimeoutError:
+        except asyncio.CancelledError:
+            # External cancellation (shutdown, reconnect) - always propagate
+            async with self.pending_reqs_lock:
+                self.pending_reqs.pop(message["id"], None)
+            raise
+        except (asyncio.TimeoutError, ConnectionError):
+            # Timeout or connection closed - let caller handle reconnect logic
             async with self.pending_reqs_lock:
                 self.pending_reqs.pop(message["id"], None)
             raise
         except Exception:
+            # Unexpected error - log but don't call close() here
+            # Let the error propagate; caller/listen() handles reconnection
             logger.exception("Unexpected error _send_moonraker_request")
-            await self.close()
+            async with self.pending_reqs_lock:
+                self.pending_reqs.pop(message["id"], None)
             raise
 
     def _find_ips(self, network):
@@ -1311,6 +1333,7 @@ class DisplayController:
                     logger.error(
                         "KeyError encountered in software_version_response. Attempting to reconnect."
                     )
+                    await self.close()
                     await asyncio.sleep(5)  # Wait before reconnecting
                     continue  # Retry the connection loop
 
@@ -1318,6 +1341,7 @@ class DisplayController:
                 raise
             except Exception as e:
                 logger.error(f"Error connecting to Moonraker: {e}")
+                await self.close()
                 await asyncio.sleep(5)  # Wait before reconnecting
                 continue
 
@@ -1434,21 +1458,23 @@ class DisplayController:
         errors_remaining: int = 10
         while not reader.at_eof():
             if self.klipper_restart_event.is_set():
-                await self._attempt_reconnect()
                 self.klipper_restart_event.clear()
+                await self._attempt_reconnect()
+                return  # Exit - new connection started
             try:
                 data = await reader.readuntil(b"\x03")
                 decoded = data[:-1].decode(encoding="utf-8")
                 item = json.loads(decoded)
             except (ConnectionError, asyncio.IncompleteReadError):
                 await self._attempt_reconnect()
-                break
+                return  # Exit - new connection started
             except asyncio.CancelledError:
                 raise
             except Exception:
                 errors_remaining -= 1
                 if not errors_remaining or not self.connected:
                     await self._attempt_reconnect()
+                    return  # Exit - new connection started
                 continue
             errors_remaining = 10
             if "id" in item:
@@ -1456,11 +1482,12 @@ class DisplayController:
                     request_data = self.pending_reqs.pop(item["id"], None)
                     if request_data is not None:
                         fut, _ = request_data
-                        fut.set_result(item)
-            elif item["method"] == "notify_status_update":
+                        if not fut.done():
+                            fut.set_result(item)
+            elif item.get("method") == "notify_status_update":
                 await self.handle_status_update(item["params"][0])
-            elif item["method"] == "notify_gcode_response":
-                await self.handle_gcode_response(item["params"][0])  
+            elif item.get("method") == "notify_gcode_response":
+                await self.handle_gcode_response(item["params"][0])
         logger.info("Unix Socket Disconnection from _process_stream()")
         await self.close()
 
@@ -1498,29 +1525,25 @@ class DisplayController:
     async def _attempt_reconnect(self):
         async with self._reconnect_lock:
             if self._is_reconnecting:
-                logger.debug("Reconnection already in progress, skipping...")
                 return
             self._is_reconnecting = True
             try:
-                # Close existing connection
-                if self.writer and not self.writer.is_closing():
+                # Cancel existing listen task first
+                if self._listen_task and not self._listen_task.done():
+                    self._listen_task.cancel()
                     try:
-                        self.writer.close()
-                        await self.writer.wait_closed()
-                    except Exception as e:
-                        logger.debug(f"Error closing writer: {e}")
+                        await self._listen_task
+                    except asyncio.CancelledError:
+                        pass
                 
-                self.connected = False
+                # Close existing connection
+                await self.close()
                 
                 logger.info("Attempting to reconnect to Moonraker...")
                 await asyncio.sleep(1)
                 
-                # Clear the listening flag if it's stuck
                 self._is_listening = False
-
-                # Allow thread pool recreation
                 self.resources.allow_new_pool()
-                
                 self.start_listening()
             finally:
                 self._is_reconnecting = False
@@ -1859,19 +1882,28 @@ class DisplayController:
                     # Load thumbnail if needed
                     if should_load_thumbnail and thumbnail_filename:
                         logger.info(f"Loading thumbnail for {thumbnail_filename} on printing page")
-                        if self._thumbnail_task and not self._thumbnail_task.done():
-                            self._thumbnail_task.cancel()
+                        
+                        # Cancel existing task under lock
+                        task_to_cancel = None
+                        async with self._filename_lock:
+                            if self._thumbnail_task and not self._thumbnail_task.done():
+                                task_to_cancel = self._thumbnail_task
+                                self._thumbnail_task = None
+                        
+                        if task_to_cancel:
+                            task_to_cancel.cancel()
                             try:
-                                await self._thumbnail_task
+                                await task_to_cancel
                             except asyncio.CancelledError:
                                 pass
                         
-                        self._thumbnail_task = self._loop.create_task(
-                            self.load_thumbnail_for_page(
-                                thumbnail_filename,
-                                thumbnail_page_id
+                        async with self._filename_lock:
+                            self._thumbnail_task = self._loop.create_task(
+                                self.load_thumbnail_for_page(
+                                    thumbnail_filename,
+                                    thumbnail_page_id
+                                )
                             )
-                        )
                         
                 elif state_to_process == "complete":
                     if current_page is None or current_page != PAGE_PRINTING_COMPLETE:
@@ -1988,14 +2020,23 @@ class DisplayController:
         if not self.connected:
             return
         self.connected = False
+
+        # Cancel all pending request futures       
+        async with self.pending_reqs_lock:
+            for fut, _ in list(self.pending_reqs.values()):
+                if not fut.done():
+                    fut.set_exception(ConnectionError("Connection closed"))
+            self.pending_reqs.clear()
         
-        # Cancel the process_stream task if it's still running
+        # Cancel process_stream task only if it's not the current task (avoid self-cancellation)
+        current_task = asyncio.current_task()
         if self._process_stream_task and not self._process_stream_task.done():
-            self._process_stream_task.cancel()
-            try:
-                await self._process_stream_task
-            except asyncio.CancelledError:
-                pass
+            if self._process_stream_task is not current_task:
+                self._process_stream_task.cancel()
+                try:
+                    await self._process_stream_task
+                except asyncio.CancelledError:
+                    pass
         
         if self.writer:
             self.writer.close()
@@ -2026,7 +2067,7 @@ class DisplayController:
 
     async def handle_gcode_response(self, response):
         if self.leveling_mode == "screw":
-            if "probe at" in response:
+            if "probe: at" in response:
                 self.screw_probe_count += 1
                 self._loop.create_task(
                     self.display.update_screw_level_description(
@@ -2054,11 +2095,38 @@ class DisplayController:
             self.bed_leveling_counts = [x_count, y_count]
         elif response.startswith("// Adapted mesh bounds"):
             self.bed_leveling_probed_count = 0
-            current_page = await self._get_current_page()  
+            self.bed_leveling_last_position = None
+            self._bed_leveling_complete = False
+            # Don't reset _rapid_scan_mode here - it may have been set by
+            # "Beginning rapid surface scan" which can come before or after this message
+            # Reset leveling_mode for KAMP during printing (not manual full bed level)
+            if self.current_state in ("printing", "paused"):
+                self.leveling_mode = None
+            current_page = await self._get_current_page()
             if current_page != PAGE_PRINTING_KAMP:
                 self._loop.create_task(self._navigate_to_page(PAGE_PRINTING_KAMP, clear_history=True))
-        elif response.startswith("// probe at"):
-            current_page = await self._get_current_page()  
+        elif "Beginning rapid surface scan" in response or "Touch home at" in response:
+            # Rapid scan mode (Eddy/Cartographer/Beacon) - these probes don't send
+            # "Adapted mesh bounds" or "probe: at" messages, so we handle everything here
+            self._rapid_scan_mode = True
+            self.bed_leveling_probed_count = 0
+            self.bed_leveling_last_position = None
+            self._bed_leveling_complete = False
+            # Reset leveling_mode for KAMP during printing
+            if self.current_state in ("printing", "paused"):
+                self.leveling_mode = None
+            logger.info("Rapid scan mode detected - using simplified visualization")
+            current_page = await self._get_current_page()
+            if current_page != PAGE_PRINTING_KAMP:
+                self._loop.create_task(self._navigate_to_page(PAGE_PRINTING_KAMP, clear_history=True))
+            self._loop.create_task(
+                self.display.update_kamp_text("Scanning bed surface...")
+            )
+        elif response.startswith("// probe: at"):
+            # Skip all probe messages during rapid scan to avoid overwhelming the system
+            if self._rapid_scan_mode:
+                return
+            current_page = await self._get_current_page()
             if current_page != PAGE_PRINTING_KAMP:
                 # We are not leveling, likely response came from manual probe e.g. from console,
                 # Skip updating the state, otherwise it messes up bed leveling screen when printing
@@ -2088,13 +2156,23 @@ class DisplayController:
                     )
                 )
 
-        elif response.startswith("// Mesh Bed Leveling Complete"):
+        elif response.startswith("// Mesh Bed Leveling Complete") or "Collecting samples along the scanning path completed" in response:
+            # If rapid scan mode was active, show completion
+            # Draw boxes if we received probe counts (some probes send both rapid scan AND counts)
+            if self._rapid_scan_mode:
+                self._loop.create_task(
+                    self.display.update_kamp_text("Scan complete!")
+                )
+
             self.bed_leveling_probed_count = 0
             self.bed_leveling_counts = self.full_bed_leveling_counts
-            current_page = await self._get_current_page()  
+            self._rapid_scan_mode = False
+
+            current_page = await self._get_current_page()
             if current_page == PAGE_PRINTING_KAMP:
                 self._bed_leveling_complete = True
-                if self.leveling_mode == "full_bed":
+                # Only show bed mesh final for manual full bed leveling (not during printing)
+                if self.leveling_mode == "full_bed" and self.current_state not in ("printing", "paused"):
                     self._loop.create_task(self.display.show_bed_mesh_final())
                 else:
                     self._loop.create_task(self._handle_bed_leveling_complete())
@@ -2225,22 +2303,31 @@ finally:
     if config_observer.is_alive():
         config_observer.join(timeout=5)
     
-    # Ensure all tasks are cancelled (Py 3.13 safe)
+    # Best-effort controller shutdown before closing the loop.
+    if "controller" in locals() and not loop.is_closed():
+        try:
+            loop.run_until_complete(controller.close())
+        except Exception as e:
+            logger.error(f"Error during controller close(): {e}")
+
+    # Ensure all tasks are cancelled and given time to handle CancelledError.
     try:
-        asyncio.get_running_loop()   # raises if no loop is running
-        pending = asyncio.all_tasks()
-    except RuntimeError:
+        pending = {t for t in asyncio.all_tasks(loop=loop) if not t.done()}
+    except Exception:
         pending = set()
 
     for task in list(pending):
         task.cancel()
 
-    if pending:
+    if pending and not loop.is_closed():
         try:
-            loop.run_until_complete(asyncio.wait(pending, timeout=5))
+            loop.run_until_complete(
+                asyncio.gather(*pending, return_exceptions=True)
+            )
+            loop.run_until_complete(loop.shutdown_asyncgens())
         except RuntimeError:
             # Loop may already be closed or not runnable here; best-effort shutdown.
             pass
-    
+
     loop.close()
     logger.info("Service stopped")

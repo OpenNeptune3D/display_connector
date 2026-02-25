@@ -338,6 +338,7 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
         self._cached_wifi_status = None
         self._last_wifi_check = 0
         self._wifi_check_interval = 30  # Only check WiFi every 30 seconds
+        self._warning_task = None
 
     async def get_firmware_version(self) -> str:
         if self._firmware_version is None:  # Check if the firmware version is cached
@@ -345,10 +346,13 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
         return self._firmware_version
 
     async def send_warning_message(self):
-        await asyncio.sleep(0.6)  # Add delay if needed
-        await self.write(
-            f'xstr 0,464,320,16,2,{TEXT_WARNING},{BACKGROUND_GRAY},1,1,1,"WARNING: Unsupported Display Firmware Version"'
-        )
+        try:
+            await asyncio.sleep(0.6)  # Add delay if needed
+            await self.write(
+                f'xstr 0,464,320,16,2,{TEXT_WARNING},{BACKGROUND_GRAY},1,1,1,"WARNING: Unsupported Display Firmware Version"'
+            )
+        finally:
+            self._warning_task = None
 
     async def check_valid_version(self):
         version = await self.get_firmware_version()
@@ -361,7 +365,8 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
                 "Unsupported firmware version. Consider updating to a supported version: "
                 + ", ".join(self.supported_firmware_versions)
             )
-            asyncio.create_task(self.send_warning_message())  # Send warning asynchronously
+            if self._warning_task is None or self._warning_task.done():
+                self._warning_task = asyncio.create_task(self.send_warning_message())
             return False
         return True
 
@@ -555,7 +560,7 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
         if self._cached_wifi_status is not None and (current_time - self._last_wifi_check) < self._wifi_check_interval:
             has_wifi, ssid, rssi_category = self._cached_wifi_status
         else:
-            has_wifi, ssid, rssi_category = get_wlan0_status()
+            has_wifi, ssid, rssi_category = await asyncio.to_thread(get_wlan0_status)
             self._cached_wifi_status = (has_wifi, ssid, rssi_category)
             self._last_wifi_check = current_time
 
@@ -650,34 +655,27 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
         await self.write("vis b[7],0")
         await self.write("vis b[8],1")
         await self.write("fill 0,110,320,290,10665")
+
         await self.write('xstr 12,320,100,20,1,65535,10665,1,1,1,"front left"')
         await self.draw_screw_level_info_at("12,340,100,20", screw_levels["front left"])
 
         await self.write('xstr 170,320,100,20,1,65535,10665,1,1,1,"front right"')
-        await self.draw_screw_level_info_at(
-            "170,340,100,20", screw_levels["front right"]
-        )
-
-        await self.write('xstr 170,120,100,20,1,65535,10665,1,1,1,"rear right"')
-        await self.draw_screw_level_info_at(
-            "170,140,100,20", screw_levels["rear right"]
-        )
+        await self.draw_screw_level_info_at("170,340,100,20", screw_levels["front right"])
 
         await self.write('xstr 12,120,100,20,1,65535,10665,1,1,1,"rear left"')
         await self.draw_screw_level_info_at("12,140,100,20", screw_levels["rear left"])
 
-        if "center right" in screw_levels:
-            await self.write('xstr 12,220,100,30,1,65535,10665,1,1,1,"center\\rright"')
-            await self.draw_screw_level_info_at(
-                "170,240,100,20", screw_levels["center right"]
-            )
-        if "center left" in screw_levels:
-            await self.write('xstr 12,120,100,20,1,65535,10665,1,1,1,"center\\rleft"')
-            await self.draw_screw_level_info_at(
-                "12,240,100,20", screw_levels["center left"]
-            )
+        await self.write('xstr 170,120,100,20,1,65535,10665,1,1,1,"rear right"')
+        await self.draw_screw_level_info_at("170,140,100,20", screw_levels["rear right"])
 
-        await self.write('xstr 96,215,100,50,1,65535,15319,1,1,1,"Retry"')
+        if "center right" in screw_levels:
+            await self.write('xstr 172,220,100,20,1,65535,10665,1,1,1,"center right"')
+            await self.draw_screw_level_info_at("172,240,100,20", screw_levels["center right"])
+        if "center left" in screw_levels:
+            await self.write('xstr 0,220,100,20,1,65535,10665,1,1,1,"center left"')
+            await self.draw_screw_level_info_at("0,240,100,20", screw_levels["center left"])
+
+        await self.write('xstr 106,214,60,60,1,65535,15319,1,1,1,"Retry"')
 
     async def draw_screw_level_info_at(self, position, level):
         if level == "base":
@@ -769,7 +767,8 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
         for part in parts:
             await self.write(
                 str(page_number) + '.cp0.write("' + str(part) + '")',
-                blocked_key=f"thumbnail_{page_number}"
+                blocked_key=f"thumbnail_{page_number}",
+                auto_unblock=False,
             )
         self.logger.debug("Thumbnail sent to display")
         await self.unblock(f"thumbnail_{page_number}")

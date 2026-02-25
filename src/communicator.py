@@ -68,7 +68,7 @@ class DisplayCommunicator:
             # Any other error: log and continue
             self.logger.warning(f"Unexpected error writing to display: {e}")
 
-    async def write(self, data, timeout=None, blocked_key=None):
+    async def write(self, data, timeout=None, blocked_key=None, auto_unblock=True):
         # Fast path: decide blocking under lock
         async with self._write_lock:
             # If someone else is blocking, queue this command
@@ -85,7 +85,7 @@ class DisplayCommunicator:
             await self._execute_command(data, timeout)
         finally:
             # If this was a blocking op, release block and send the next queued command (if any)
-            if blocked_key:
+            if blocked_key and auto_unblock:
                 await self.unblock(blocked_key)
 
     async def unblock(self, blocked_key):
@@ -127,9 +127,11 @@ class DisplayCommunicator:
 
     async def navigate_to(self, page_id):
         # Block other writes while we switch pages
-        await self.write(f"page {page_id}", blocked_key="__nav__")
-        await asyncio.sleep(0.25)  # give the HMI time to swap pages
-        await self.unblock("__nav__")
+        try:
+            await self.write(f"page {page_id}", blocked_key="__nav__", auto_unblock=False)
+            await asyncio.sleep(0.25)  # give the HMI time to swap pages
+        finally:
+            await self.unblock("__nav__")
 
     async def update_data(self, new_data, data_mapping=None, current_data=None):
         if data_mapping is None:
