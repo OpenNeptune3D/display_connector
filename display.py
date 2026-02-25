@@ -1206,9 +1206,10 @@ class DisplayController:
                     logger.error(f"Unexpected response format from printer.objects.subscribe: {ret}")
                     raise Exception("Failed to subscribe to printer objects")
                 
-                # Now wait for the process_stream task to complete (keeps connection alive)
+                # Keep the listen task alive while the Moonraker stream reader runs.
                 logger.info("Listen task now monitoring connection...")
                 if self._process_stream_task:
+                    await asyncio.shield(self._process_stream_task)
                     logger.info("Process stream task completed, connection closed")
                 else:
                     logger.warning("No process_stream task found!")
@@ -1332,6 +1333,7 @@ class DisplayController:
                     logger.error(
                         "KeyError encountered in software_version_response. Attempting to reconnect."
                     )
+                    await self.close()
                     await asyncio.sleep(5)  # Wait before reconnecting
                     continue  # Retry the connection loop
 
@@ -1339,6 +1341,7 @@ class DisplayController:
                 raise
             except Exception as e:
                 logger.error(f"Error connecting to Moonraker: {e}")
+                await self.close()
                 await asyncio.sleep(5)  # Wait before reconnecting
                 continue
 
@@ -1479,7 +1482,8 @@ class DisplayController:
                     request_data = self.pending_reqs.pop(item["id"], None)
                     if request_data is not None:
                         fut, _ = request_data
-                        fut.set_result(item)
+                        if not fut.done():
+                            fut.set_result(item)
             elif item.get("method") == "notify_status_update":
                 await self.handle_status_update(item["params"][0])
             elif item.get("method") == "notify_gcode_response":
@@ -2299,22 +2303,31 @@ finally:
     if config_observer.is_alive():
         config_observer.join(timeout=5)
     
-    # Ensure all tasks are cancelled (Py 3.13 safe)
+    # Best-effort controller shutdown before closing the loop.
+    if "controller" in locals() and not loop.is_closed():
+        try:
+            loop.run_until_complete(controller.close())
+        except Exception as e:
+            logger.error(f"Error during controller close(): {e}")
+
+    # Ensure all tasks are cancelled and given time to handle CancelledError.
     try:
-        asyncio.get_running_loop()   # raises if no loop is running
-        pending = asyncio.all_tasks()
-    except RuntimeError:
+        pending = {t for t in asyncio.all_tasks(loop=loop) if not t.done()}
+    except Exception:
         pending = set()
 
     for task in list(pending):
         task.cancel()
 
-    if pending:
+    if pending and not loop.is_closed():
         try:
-            loop.run_until_complete(asyncio.wait(pending, timeout=5))
+            loop.run_until_complete(
+                asyncio.gather(*pending, return_exceptions=True)
+            )
+            loop.run_until_complete(loop.shutdown_asyncgens())
         except RuntimeError:
             # Loop may already be closed or not runnable here; best-effort shutdown.
             pass
-    
+
     loop.close()
     logger.info("Service stopped")
