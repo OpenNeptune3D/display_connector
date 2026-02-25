@@ -2020,10 +2020,10 @@ class DisplayController:
         if not self.connected:
             return
         self.connected = False
-        
-        # Cancel all pending request futures
+
+        # Cancel all pending request futures       
         async with self.pending_reqs_lock:
-            for req_id, (fut, _) in list(self.pending_reqs.items()):
+            for fut, _ in list(self.pending_reqs.values()):
                 if not fut.done():
                     fut.set_exception(ConnectionError("Connection closed"))
             self.pending_reqs.clear()
