@@ -29,4 +29,8 @@ async def test_navigate(communicator):
     await communicator.navigate_to("1")
 
     # navigate_to blocks other writes with a blocked_key="__nav__"
-    communicator.write.assert_awaited_once_with("page 1", blocked_key="__nav__")
+    communicator.write.assert_awaited_once_with(
+        "page 1",
+        blocked_key="__nav__",
+        auto_unblock=False,
+    )
