@@ -655,34 +655,27 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
         await self.write("vis b[7],0")
         await self.write("vis b[8],1")
         await self.write("fill 0,110,320,290,10665")
+
         await self.write('xstr 12,320,100,20,1,65535,10665,1,1,1,"front left"')
         await self.draw_screw_level_info_at("12,340,100,20", screw_levels["front left"])
 
         await self.write('xstr 170,320,100,20,1,65535,10665,1,1,1,"front right"')
-        await self.draw_screw_level_info_at(
-            "170,340,100,20", screw_levels["front right"]
-        )
-
-        await self.write('xstr 170,120,100,20,1,65535,10665,1,1,1,"rear right"')
-        await self.draw_screw_level_info_at(
-            "170,140,100,20", screw_levels["rear right"]
-        )
+        await self.draw_screw_level_info_at("170,340,100,20", screw_levels["front right"])
 
         await self.write('xstr 12,120,100,20,1,65535,10665,1,1,1,"rear left"')
         await self.draw_screw_level_info_at("12,140,100,20", screw_levels["rear left"])
 
-        if "center right" in screw_levels:
-            await self.write('xstr 12,220,100,30,1,65535,10665,1,1,1,"center\\rright"')
-            await self.draw_screw_level_info_at(
-                "170,240,100,20", screw_levels["center right"]
-            )
-        if "center left" in screw_levels:
-            await self.write('xstr 12,120,100,20,1,65535,10665,1,1,1,"center\\rleft"')
-            await self.draw_screw_level_info_at(
-                "12,240,100,20", screw_levels["center left"]
-            )
+        await self.write('xstr 170,120,100,20,1,65535,10665,1,1,1,"rear right"')
+        await self.draw_screw_level_info_at("170,140,100,20", screw_levels["rear right"])
 
-        await self.write('xstr 96,215,100,50,1,65535,15319,1,1,1,"Retry"')
+        if "center right" in screw_levels:
+            await self.write('xstr 172,220,100,20,1,65535,10665,1,1,1,"center right"')
+            await self.draw_screw_level_info_at("172,240,100,20", screw_levels["center right"])
+        if "center left" in screw_levels:
+            await self.write('xstr 0,220,100,20,1,65535,10665,1,1,1,"center left"')
+            await self.draw_screw_level_info_at("0,240,100,20", screw_levels["center left"])
+
+        await self.write('xstr 106,214,60,60,1,65535,15319,1,1,1,"Retry"')
 
     async def draw_screw_level_info_at(self, position, level):
         if level == "base":
