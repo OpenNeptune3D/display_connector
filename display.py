@@ -1964,6 +1964,15 @@ class DisplayController:
                         current_page == PAGE_OVERLAY_LOADING):
                         await self._navigate_to_page(PAGE_MAIN, clear_history=True)
                         self._cached_page = None
+                    elif current_page == PAGE_MAIN:
+                        # Already on main (e.g. after Klipper firmware restart while idle).
+                        # _navigate_to_page is a no-op when current_page == target, so call
+                        # special_page_handling directly to redraw wifi icon, model name, and
+                        # custom bar without issuing an unnecessary page-switch to the HMI.
+                        try:
+                            await self.special_page_handling(PAGE_MAIN)
+                        except Exception as e:
+                            logger.error(f"Error refreshing main page after reconnect: {e}")
 
         if "print_duration" in new_data.get("print_stats", {}):
             self.current_print_duration = new_data["print_stats"]["print_duration"]
