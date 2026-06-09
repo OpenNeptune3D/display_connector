@@ -311,6 +311,12 @@ class DisplayController:
 
         self._files_lock = asyncio.Lock()
 
+        self._last_page_check_time = 0
+        self._cached_page = None
+        self._page_check_lock = asyncio.Lock()
+
+        self._http_session = None
+
 
     def pathname2url(self, path):
         return quote(path.replace("\\", "/"))
@@ -1175,7 +1181,10 @@ class DisplayController:
             # Allow thread pool recreation after potential shutdown
             self.resources.allow_new_pool()
 
-            
+            # Start cleanup task for stale requests (runs for the lifetime of this connection)
+            if self._cleanup_task is None or self._cleanup_task.done():
+                self._cleanup_task = self._loop.create_task(self._cleanup_stale_requests())
+
             # Connect to display
             try:
                 await self.display.connect()
@@ -1292,11 +1301,7 @@ class DisplayController:
         # Store request with timestamp
         async with self.pending_reqs_lock:
             self.pending_reqs[message["id"]] = (fut, time.time())
-            
-        # Start cleanup task if not running
-        if self._cleanup_task is None or self._cleanup_task.done():
-            self._cleanup_task = self._loop.create_task(self._cleanup_stale_requests())
-            
+
         try:
             data = json.dumps(message).encode() + b"\x03"
             self.writer.write(data)
@@ -1752,12 +1757,13 @@ class DisplayController:
             
             logger.info(f"Fetching thumbnail image from {url}")
             
-            # PHASE 1: Fetch image with timeout
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                    if resp.status != 200:
-                        raise aiohttp.ClientError(f"Failed to fetch thumbnail, status code: {resp.status}")
-                    img_data = await resp.read()
+            # PHASE 1: Fetch image with timeout (reuse session across calls)
+            if self._http_session is None or self._http_session.closed:
+                self._http_session = aiohttp.ClientSession()
+            async with self._http_session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                if resp.status != 200:
+                    raise aiohttp.ClientError(f"Failed to fetch thumbnail, status code: {resp.status}")
+                img_data = await resp.read()
             
             thumbnail = Image.open(io.BytesIO(img_data))
             
@@ -1815,12 +1821,6 @@ class DisplayController:
     async def handle_status_update(self, new_data, data_mapping=None):
         if data_mapping is None:
             data_mapping = self.display.mapper.data_mapping
-        
-        # RATE LIMITING: Only check page max once per second
-        if not hasattr(self, '_last_page_check_time'):
-            self._last_page_check_time = 0
-            self._cached_page = None
-            self._page_check_lock = asyncio.Lock()  # NEW: Separate lock
         
         now = time.time()
         time_since_last_check = now - self._last_page_check_time
@@ -2127,6 +2127,10 @@ class DisplayController:
             self._update_data_task.cancel()
         self._update_data_task = None
         self._pending_update_data = None
+
+        if self._http_session and not self._http_session.closed:
+            await self._http_session.close()
+        self._http_session = None
 
         if self.writer:
             self.writer.close()
