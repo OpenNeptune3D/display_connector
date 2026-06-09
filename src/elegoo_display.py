@@ -555,14 +555,17 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
         )
 
     async def update_wifi_ui(self):
-        # Use cached WiFi status if checked recently
-        current_time = time.time()
-        if self._cached_wifi_status is not None and (current_time - self._last_wifi_check) < self._wifi_check_interval:
-            has_wifi, ssid, rssi_category = self._cached_wifi_status
-        else:
-            has_wifi, ssid, rssi_category = await asyncio.to_thread(get_wlan0_status)
-            self._cached_wifi_status = (has_wifi, ssid, rssi_category)
-            self._last_wifi_check = current_time
+        try:
+            current_time = time.time()
+            if self._cached_wifi_status is not None and (current_time - self._last_wifi_check) < self._wifi_check_interval:
+                has_wifi, ssid, rssi_category = self._cached_wifi_status
+            else:
+                has_wifi, ssid, rssi_category = await asyncio.to_thread(get_wlan0_status)
+                self._cached_wifi_status = (has_wifi, ssid, rssi_category)
+                self._last_wifi_check = current_time
+        except Exception:
+            self.logger.warning("WiFi status check failed, skipping wifi icon")
+            return False
 
         if not has_wifi:
             await self.write("picq 230,0,42,42,214")
