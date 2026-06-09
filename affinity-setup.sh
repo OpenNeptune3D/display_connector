@@ -48,14 +48,21 @@ set_performance_governor() {
     return 0
   }
 
+  # Use schedutil (preferred) or ondemand as fallback — not performance.
+  # On fanless SBCs, performance mode keeps all cores at max frequency even
+  # when idle, causing thermal throttling that hurts Klipper more than it helps.
+  # schedutil/ondemand ramps quickly for Klipper bursts while staying cool at rest.
+  governor="schedutil"
   if have cpupower; then
-    cpupower frequency-set -g performance >/dev/null 2>&1 || true
+    cpupower frequency-set -g "$governor" >/dev/null 2>&1 || \
+      cpupower frequency-set -g ondemand >/dev/null 2>&1 || true
   else
     for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
-      [ -w "$g" ] && echo performance > "$g" 2>/dev/null || true
+      [ -w "$g" ] || continue
+      echo "$governor" > "$g" 2>/dev/null || echo ondemand > "$g" 2>/dev/null || true
     done
   fi
-  log "CPU governor set to performance (best effort)"
+  log "CPU governor set to $governor (best effort)"
 }
 
 set_performance_governor
