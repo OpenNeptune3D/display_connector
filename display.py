@@ -1715,8 +1715,8 @@ class DisplayController:
                     # completed successfully before the cancel arrived, leave it visible.
                     if not self._thumbnail_displayed:
                         await self.display.hide_thumbnail()
-                except Exception:
-                    pass
+                except Exception as cleanup_err:
+                    logger.debug(f"Best-effort thumbnail cleanup failed: {cleanup_err}")
                 raise
             except Exception as e:
                 logger.error(f"Error displaying thumbnail: {e}")
