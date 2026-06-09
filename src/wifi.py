@@ -1,6 +1,8 @@
 import subprocess  # nosec
 
 
+_NMCLI_TIMEOUT = 5  # seconds per subprocess call
+
 def get_wlan0_status():
     """
     Get WiFi status without triggering a scan by using cached data.
@@ -9,9 +11,10 @@ def get_wlan0_status():
     try:
         # Get connection name and state from device info (no scan)
         connection_output = subprocess.check_output(
-            ["nmcli", "-t", "-f", "GENERAL.CONNECTION,GENERAL.STATE", "dev", "show", "wlan0"]
+            ["nmcli", "-t", "-f", "GENERAL.CONNECTION,GENERAL.STATE", "dev", "show", "wlan0"],
+            timeout=_NMCLI_TIMEOUT,
         ).decode("utf-8")  # nosec B603, B607
-        
+
         # Check if we're connected and get the connection name
         is_connected = False
         connection_name = None
@@ -20,16 +23,17 @@ def get_wlan0_status():
                 is_connected = True
             elif line.startswith("GENERAL.CONNECTION:"):
                 connection_name = line.split(":", 1)[1]
-        
+
         if not is_connected or not connection_name:
             return False, None, None
-        
+
         # Get SSID from the connection details (no scan)
         ssid_output = subprocess.check_output(
-            ["nmcli", "-t", "-f", "connection.id,802-11-wireless.ssid", 
-             "connection", "show", connection_name]
+            ["nmcli", "-t", "-f", "connection.id,802-11-wireless.ssid",
+             "connection", "show", connection_name],
+            timeout=_NMCLI_TIMEOUT,
         ).decode("utf-8")  # nosec B603, B607
-        
+
         ssid = connection_name  # Default to connection name
         for line in ssid_output.strip().split("\n"):
             if line.startswith("802-11-wireless.ssid:"):
@@ -37,13 +41,14 @@ def get_wlan0_status():
                 if found_ssid:
                     ssid = found_ssid
                 break
-        
+
         # Get signal strength using cached data (--rescan no prevents scanning)
         signal_output = subprocess.check_output(
-            ["nmcli", "-t", "-m", "tabular", "-f", "IN-USE,SIGNAL", 
-             "dev", "wifi", "list", "--rescan", "no"]
+            ["nmcli", "-t", "-m", "tabular", "-f", "IN-USE,SIGNAL",
+             "dev", "wifi", "list", "--rescan", "no"],
+            timeout=_NMCLI_TIMEOUT,
         ).decode("utf-8")  # nosec B603, B607
-        
+
         rssi = None
         for line in signal_output.strip().split("\n"):
             if line.startswith("*:"):
@@ -52,15 +57,17 @@ def get_wlan0_status():
                 except (ValueError, IndexError):
                     pass
                 break
-        
+
         # Categorise the signal strength
         rssi_category = categorize_signal_strength(rssi)
-        
+
         return True, ssid, rssi_category
 
     except subprocess.CalledProcessError:
         return False, None, None
     except FileNotFoundError:
+        return False, None, None
+    except Exception:
         return False, None, None
 
 
