@@ -160,7 +160,7 @@ class DisplayCommunicator:
 
     async def _update_data_recursive(self, new_data, data_mapping, current_data):
         is_dict = isinstance(new_data, dict)
-        keys_to_iterate = list(new_data.keys()) if is_dict else range(len(new_data))
+        keys_to_iterate = new_data.keys() if is_dict else range(len(new_data))
         
         for key in keys_to_iterate:
             if key in data_mapping:
@@ -183,7 +183,6 @@ class DisplayCommunicator:
                         else f"{mapped_key}.{mapping_leaf.field_type}={formatted}"
                     )
                     await self.write(command)
-                    await asyncio.sleep(0.05)  # Small delay to ensure each command is processed
             except Exception as e:
                 # Log but continue processing other mappings
                 self.logger.debug(f"Failed to update display leaf: {e}")
