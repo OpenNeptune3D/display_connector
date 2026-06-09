@@ -1,7 +1,24 @@
+import asyncio
 from unittest.mock import MagicMock
 
 import pytest
 from src.tjc import EventType, TJCClient, TJCNumericInputPayload, TJCProtocol, TJCTouchCoordinatePayload, TJCTouchDataPayload
+
+
+@pytest.fixture(autouse=True)
+def ensure_event_loop():
+    """Provide an event loop for sync tests that instantiate TJCProtocol.
+
+    NextionProtocol.__init__ (upstream) calls asyncio.get_event_loop().create_future(),
+    which raises RuntimeError in Python 3.10+ when no loop is set in the current thread.
+    Async tests (marked with @pytest.mark.asyncio) get their own loop from pytest-asyncio;
+    this fixture guarantees sync tests have one too.
+    """
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    yield
+    loop.close()
+    asyncio.set_event_loop(None)
 
 
 def test_is_event():
