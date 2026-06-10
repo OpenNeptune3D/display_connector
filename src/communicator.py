@@ -42,14 +42,12 @@ class DisplayCommunicator:
     async def connect(self):
         try:
             await self.display.connect()
-            # After a (re)connect the display is freshly initialised to page main.
-            # Any blocked_by lock or buffered writes targeted the old connection/page
-            # context and must be discarded so they don't arrive on the new connection.
-            self.blocked_by = None
-            self.blocked_buffer.clear()
         except Exception as e:
             self.logger.error(f"Failed to connect to display: {str(e)}")
             raise
+        async with self._write_lock:
+            self.blocked_by = None
+            self.blocked_buffer.clear() 
 
     async def _execute_command(self, data, timeout=None):
         """Execute a display command directly without queueing logic."""
