@@ -1,6 +1,6 @@
 #!/bin/sh
 # Minimal display affinity helper:
-# - optionally set CPU governor to performance
+# - optionally set CPU governor to schedutil/ondemand
 # - de-prioritize display.service so UI work is less likely to interfere
 #   with Klipper/Moonraker on low-power SBCs
 
@@ -52,17 +52,27 @@ set_performance_governor() {
   # On fanless SBCs, performance mode keeps all cores at max frequency even
   # when idle, causing thermal throttling that hurts Klipper more than it helps.
   # schedutil/ondemand ramps quickly for Klipper bursts while staying cool at rest.
-  governor="schedutil"
+  applied_governor=""
   if have cpupower; then
-    cpupower frequency-set -g "$governor" >/dev/null 2>&1 || \
-      cpupower frequency-set -g ondemand >/dev/null 2>&1 || true
+    if cpupower frequency-set -g schedutil >/dev/null 2>&1; then
+      applied_governor="schedutil"
+    elif cpupower frequency-set -g ondemand >/dev/null 2>&1; then
+      applied_governor="ondemand"
+    fi
   else
-    for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
-      [ -w "$g" ] || continue
-      echo "$governor" > "$g" 2>/dev/null || echo ondemand > "$g" 2>/dev/null || true
+    for gov_file in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+      if echo schedutil > "$gov_file" 2>/dev/null; then
+        applied_governor="schedutil"
+      elif echo ondemand > "$gov_file" 2>/dev/null; then
+        applied_governor="ondemand"
+      fi
     done
   fi
-  log "CPU governor set to $governor (best effort)"
+  if [ -n "$applied_governor" ]; then
+    log "CPU governor applied: $applied_governor where supported (best effort)"
+  else
+    log "CPU governor unchanged; schedutil/ondemand not available or not writable"
+  fi
 }
 
 set_performance_governor
