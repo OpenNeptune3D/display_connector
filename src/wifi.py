@@ -1,5 +1,8 @@
+import logging
 import subprocess  # nosec
 
+
+logger = logging.getLogger(__name__)
 
 _NMCLI_TIMEOUT = 5  # seconds per subprocess call
 
@@ -63,11 +66,14 @@ def get_wlan0_status():
 
         return True, ssid, rssi_category
 
+    except subprocess.TimeoutExpired:
+        return False, None, None
     except subprocess.CalledProcessError:
         return False, None, None
     except FileNotFoundError:
         return False, None, None
     except Exception:
+        logger.debug("Unexpected WiFi status failure", exc_info=True)
         return False, None, None
 
 
