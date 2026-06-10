@@ -1481,6 +1481,11 @@ class DisplayController:
             self.handle_input(data.page_id, data.component_id, data.value)
         elif type == EventType.RECONNECTED:
             logger.info("Reconnected to Display")
+            # Re-enable touch coordinate reporting; the panel forgets this
+            # setting across a serial reconnect, which breaks custom touch
+            # areas (e.g. the shutdown dialogue hotspot on main) even though
+            # normal page-button touches keep working.
+            await self.display.write("sendxy=1")
             # Clear history so we don't fight with a stale page stack
             async with self._history_lock:
                 self.history = []
