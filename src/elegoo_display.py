@@ -410,6 +410,9 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
                 + ',1,1,1,"github.com/OpenNeptune3D"'
             )
         elif current_page == PAGE_LIGHTS:
+            # Label writes intentionally disabled: writing English literals to t0/t1
+            # breaks non-English TFT locales. Re-enable only with locale-aware labels
+            # or after moving labels fully into the TFT assets.
             pass
         elif current_page == PAGE_PRINTING:
             await self.write("printvalue.xcen=0")
@@ -563,7 +566,7 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
                 self._cached_wifi_status = (has_wifi, ssid, rssi_category)
                 self._last_wifi_check = current_time
         except Exception:
-            self.logger.warning("WiFi status check failed, skipping wifi icon")
+            self.logger.debug("Failed to update WiFi UI", exc_info=True)
             return False
 
         if not has_wifi:
