@@ -15,7 +15,7 @@ REQ_FILE="$PROJECT_DIR/requirements.txt"
 # --- System packages (lightweight) -------------------------------------------
 echo "[1/6] Updating APT and installing minimal prereqs..."
 sudo apt-get update
-sudo apt-get install -y libsystemd-dev setserial
+sudo apt-get install -y libsystemd-dev setserial python3-systemd pkg-config
 
 # --- Python / venv selection --------------------------------------------------
 # Prefer 3.13, then 3.12, then 3.11, else system default python3-venv.

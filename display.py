@@ -42,6 +42,7 @@ from src.mapping import (
     filename_regex_wrapper,
     PAGE_MAIN,
     PAGE_FILES,
+    PAGE_SHUTDOWN_DIALOG,
     PAGE_PREPARE_MOVE,
     PAGE_PREPARE_TEMP,
     PAGE_PREPARE_EXTRUDER,
@@ -154,6 +155,21 @@ def get_communicator(display, model) -> DisplayCommunicator:
     return ElegooNeptune4DisplayCommunicator
 
 SOCKET_LIMIT = 20 * 1024 * 1024
+
+
+def _deep_merge_dicts(target: dict, source: dict) -> None:
+    """Merge source into target in-place, recursing into nested dicts.
+
+    Used to coalesce consecutive Moonraker delta updates so that no field
+    change is lost when a new status notification arrives before the previous
+    update_data task has finished processing.
+    """
+    for key, value in source.items():
+        if key in target and isinstance(target[key], dict) and isinstance(value, dict):
+            _deep_merge_dicts(target[key], value)
+        else:
+            target[key] = value
+
 
 class ResourceManager:
     
@@ -279,8 +295,12 @@ class DisplayController:
         self._last_thumbnail_request = None
         self._thumbnail_retry_lock = asyncio.Lock()
         self._bed_leveling_complete = False
-        self._thumbnail_displayed = False  
-        self._thumbnail_task = None 
+        self._thumbnail_displayed = False
+        self._thumbnail_task = None
+        self._speed_ui_task = None
+        self._update_data_task = None
+        self._ips_retry_task = None
+        self._pending_update_data = None
 
         self._is_reconnecting = False
         self._listen_task = None
@@ -291,6 +311,12 @@ class DisplayController:
         self._reconnect_lock = asyncio.Lock()
 
         self._files_lock = asyncio.Lock()
+
+        self._last_page_check_time = 0
+        self._cached_page = None
+        self._page_check_lock = asyncio.Lock()
+
+        self._http_session = None
 
 
     def pathname2url(self, path):
@@ -540,6 +566,16 @@ class DisplayController:
         
         # Action phase (outside lock - I/O)
         if should_navigate:
+            # For pages rendered entirely via raw draw commands (e.g. shutdown_dialog on
+            # none_9), cancel any in-flight data-update task first. Its writes target
+            # main-page components and compete for _serial_lock, delaying the dialog
+            # content writes and leaving a blank screen longer than necessary.
+            if page == PAGE_SHUTDOWN_DIALOG:
+                if self._update_data_task and not self._update_data_task.done():
+                    self._update_data_task.cancel()
+                    self._update_data_task = None
+                self._pending_update_data = None
+
             await self.display.navigate_to(mapped_page)
             logger.debug(f"Navigating to {page}")
 
@@ -1146,7 +1182,10 @@ class DisplayController:
             # Allow thread pool recreation after potential shutdown
             self.resources.allow_new_pool()
 
-            
+            # Start cleanup task for stale requests (runs for the lifetime of this connection)
+            if self._cleanup_task is None or self._cleanup_task.done():
+                self._cleanup_task = self._loop.create_task(self._cleanup_stale_requests())
+
             # Connect to display
             try:
                 await self.display.connect()
@@ -1263,11 +1302,7 @@ class DisplayController:
         # Store request with timestamp
         async with self.pending_reqs_lock:
             self.pending_reqs[message["id"]] = (fut, time.time())
-            
-        # Start cleanup task if not running
-        if self._cleanup_task is None or self._cleanup_task.done():
-            self._cleanup_task = self._loop.create_task(self._cleanup_stale_requests())
-            
+
         try:
             data = json.dumps(message).encode() + b"\x03"
             self.writer.write(data)
@@ -1379,16 +1414,35 @@ class DisplayController:
             # Don't crash - we're already connected and can function
 
         # Get system info - also wrapped for safety
+        if not await self._refresh_ips():
+            # Network may not be up yet on first boot - keep retrying in the
+            # background so the IP appears without needing a service restart.
+            if self._ips_retry_task is None or self._ips_retry_task.done():
+                self._ips_retry_task = self._loop.create_task(self._retry_refresh_ips())
+
+    async def _refresh_ips(self) -> bool:
+        """Fetch the machine's IP addresses from Moonraker. Returns True if any were found."""
         try:
             system_response = await self._send_moonraker_request("machine.system_info")
             if "result" in system_response:
                 system = system_response["result"]["system_info"]
-                self.display.ips = ", ".join(self._find_ips(system["network"]))
+                ips = self._find_ips(system["network"])
+                if ips:
+                    self.display.ips = ", ".join(ips)
+                    return True
             else:
                 logger.warning("Could not retrieve system info")
         except Exception as e:
             logger.error(f"Error getting system info: {e}")
             # Continue anyway - not critical
+        return False
+
+    async def _retry_refresh_ips(self) -> None:
+        for _ in range(12):  # retry for up to a minute
+            await asyncio.sleep(5)
+            if await self._refresh_ips():
+                return
+        logger.warning("Gave up waiting for network IP address after retries")
 
     def _make_rpc_msg(self, method: str, **kwargs):
         msg = {"jsonrpc": "2.0", "method": method}
@@ -1405,7 +1459,14 @@ class DisplayController:
                 self.execute_action(response_actions[page][component])
                 return
         if component == 0:
-            self._loop.create_task(self._go_back())
+            # Don't blindly go back if the current logical page owns its navigation
+            # through custom_touch_actions (e.g. shutdown_dialog). Blank HMI pages
+            # like none_9 fire component-0 TOUCH events on any touch; letting them
+            # trigger _go_back() immediately undoes the navigation we just performed.
+            # Pages in custom_touch_actions have explicit back actions defined there.
+            current_logical = self.history[-1] if self.history else None
+            if current_logical not in custom_touch_actions:
+                self._loop.create_task(self._go_back())
             return
         logger.info(f"Unhandled Response: {page} {component}")
 
@@ -1440,6 +1501,11 @@ class DisplayController:
             self.handle_input(data.page_id, data.component_id, data.value)
         elif type == EventType.RECONNECTED:
             logger.info("Reconnected to Display")
+            # Re-enable touch coordinate reporting; the panel forgets this
+            # setting across a serial reconnect, which breaks custom touch
+            # areas (e.g. the shutdown dialogue hotspot on main) even though
+            # normal page-button touches keep working.
+            await self.display.write("sendxy=1")
             # Clear history so we don't fight with a stale page stack
             async with self._history_lock:
                 self.history = []
@@ -1664,6 +1730,18 @@ class DisplayController:
                 self._thumbnail_displayed = True
             except asyncio.CancelledError:
                 logger.info("Thumbnail loading cancelled")
+                # display_thumbnail holds blocked_by="thumbnail_X" with auto_unblock=False.
+                # If cancelled mid-loop that block is never released, causing all subsequent
+                # write() calls (including navigate_to) to silently queue in blocked_buffer
+                # instead of reaching the display.  Release it here before re-raising.
+                try:
+                    await self.display.unblock(f"thumbnail_{page_number}")
+                    # Only hide if the thumbnail wasn't fully written — if display_thumbnail
+                    # completed successfully before the cancel arrived, leave it visible.
+                    if not self._thumbnail_displayed:
+                        await self.display.hide_thumbnail()
+                except Exception as cleanup_err:
+                    logger.debug(f"Best-effort thumbnail cleanup failed: {cleanup_err}")
                 raise
             except Exception as e:
                 logger.error(f"Error displaying thumbnail: {e}")
@@ -1704,12 +1782,13 @@ class DisplayController:
             
             logger.info(f"Fetching thumbnail image from {url}")
             
-            # PHASE 1: Fetch image with timeout
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                    if resp.status != 200:
-                        raise aiohttp.ClientError(f"Failed to fetch thumbnail, status code: {resp.status}")
-                    img_data = await resp.read()
+            # PHASE 1: Fetch image with timeout (reuse session across calls)
+            if self._http_session is None or self._http_session.closed:
+                self._http_session = aiohttp.ClientSession()
+            async with self._http_session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                if resp.status != 200:
+                    raise aiohttp.ClientError(f"Failed to fetch thumbnail, status code: {resp.status}")
+                img_data = await resp.read()
             
             thumbnail = Image.open(io.BytesIO(img_data))
             
@@ -1768,12 +1847,6 @@ class DisplayController:
         if data_mapping is None:
             data_mapping = self.display.mapper.data_mapping
         
-        # RATE LIMITING: Only check page max once per second
-        if not hasattr(self, '_last_page_check_time'):
-            self._last_page_check_time = 0
-            self._cached_page = None
-            self._page_check_lock = asyncio.Lock()  # NEW: Separate lock
-        
         now = time.time()
         time_since_last_check = now - self._last_page_check_time
         
@@ -1795,9 +1868,6 @@ class DisplayController:
             # Use cached value (no lock needed for read)
             current_page = self._cached_page
         
-        if current_page == PAGE_MAIN:
-            await asyncio.sleep(0.1)
-
         if "print_stats" in new_data:
             should_load_thumbnail = False
             thumbnail_filename = None
@@ -1906,17 +1976,28 @@ class DisplayController:
                             )
                         
                 elif state_to_process == "complete":
+                    self._last_thumbnail_request = None
                     if current_page is None or current_page != PAGE_PRINTING_COMPLETE:
                         await self._navigate_to_page(PAGE_PRINTING_COMPLETE)
                         self._cached_page = None
-                        
+
                 else:
-                    if (current_page is None or 
-                        current_page in PRINTING_PAGES or 
-                        current_page == PAGE_PRINTING_COMPLETE or 
+                    self._last_thumbnail_request = None
+                    if (current_page is None or
+                        current_page in PRINTING_PAGES or
+                        current_page == PAGE_PRINTING_COMPLETE or
                         current_page == PAGE_OVERLAY_LOADING):
                         await self._navigate_to_page(PAGE_MAIN, clear_history=True)
                         self._cached_page = None
+                    elif current_page == PAGE_MAIN:
+                        # Already on main (e.g. after Klipper firmware restart while idle).
+                        # _navigate_to_page is a no-op when current_page == target, so call
+                        # special_page_handling directly to redraw wifi icon, model name, and
+                        # custom bar without issuing an unnecessary page-switch to the HMI.
+                        try:
+                            await self.special_page_handling(PAGE_MAIN)
+                        except Exception as e:
+                            logger.error(f"Error refreshing main page after reconnect: {e}")
 
         if "print_duration" in new_data.get("print_stats", {}):
             self.current_print_duration = new_data["print_stats"]["print_duration"]
@@ -1931,6 +2012,14 @@ class DisplayController:
             logger.warning(f"Error calculating remaining time: {e}")
 
         self._update_misc_states(new_data, data_mapping)
+
+    async def _run_coalesced_update(self, initial_data, data_mapping):
+        """Process initial_data then drain any deltas that accumulated while running."""
+        await self.display.update_data(initial_data, data_mapping)
+        while self._pending_update_data is not None:
+            pending = self._pending_update_data
+            self._pending_update_data = None
+            await self.display.update_data(pending, data_mapping)
 
     def _update_misc_states(self, new_data, data_mapping):
         # Handle other updates: lights, fans, filament sensor, etc.
@@ -1948,15 +2037,12 @@ class DisplayController:
                 int(new_data["output_pin Frame_Light"]["value"]) == 1
             )
 
+        needs_speed_ui_update = False
+
         if "fan" in new_data:
             self.fan_state = float(new_data["fan"]["speed"]) > 0
             self.printing_target_speeds["fan"] = float(new_data["fan"]["speed"])
-            self._loop.create_task(
-                self.display.update_printing_speed_settings_ui(
-                    self.printing_selected_speed_type,
-                    self.printing_target_speeds[self.printing_selected_speed_type],
-                )
-            )
+            needs_speed_ui_update = True
 
         # Update other heating values, sensors, etc.
         if f"filament_switch_sensor {self.filament_sensor_name}" in new_data:
@@ -1988,24 +2074,36 @@ class DisplayController:
             extrude_factor = new_data["gcode_move"].get("extrude_factor")
             if extrude_factor is not None:
                 self.printing_target_speeds["flow"] = float(extrude_factor)
-                self._loop.create_task(
-                    self.display.update_printing_speed_settings_ui(
-                        self.printing_selected_speed_type,
-                        self.printing_target_speeds[self.printing_selected_speed_type],
-                    )
-                )
+                needs_speed_ui_update = True
 
             speed_factor = new_data["gcode_move"].get("speed_factor")
             if speed_factor is not None:
                 self.printing_target_speeds["print"] = float(speed_factor)
-                self._loop.create_task(
-                    self.display.update_printing_speed_settings_ui(
-                        self.printing_selected_speed_type,
-                        self.printing_target_speeds[self.printing_selected_speed_type],
-                    )
-                )
+                needs_speed_ui_update = True
 
-        self._loop.create_task(self.display.update_data(new_data, data_mapping))
+        if needs_speed_ui_update:
+            if self._speed_ui_task and not self._speed_ui_task.done():
+                self._speed_ui_task.cancel()
+            self._speed_ui_task = self._loop.create_task(
+                self.display.update_printing_speed_settings_ui(
+                    self.printing_selected_speed_type,
+                    self.printing_target_speeds[self.printing_selected_speed_type],
+                )
+            )
+
+        if self._update_data_task and not self._update_data_task.done():
+            # Task is still running — accumulate the delta so no field change is lost.
+            # Moonraker sends only changed fields per notification; cancelling the running
+            # task and starting fresh would silently discard fields (e.g. light pin state,
+            # progress) that won't appear in subsequent notifications if they don't change again.
+            if self._pending_update_data is None:
+                self._pending_update_data = {}
+            _deep_merge_dicts(self._pending_update_data, new_data)
+        else:
+            self._pending_update_data = None
+            self._update_data_task = self._loop.create_task(
+                self._run_coalesced_update(new_data, data_mapping)
+            )
 
     def printer_heating_value_changed(self, heater, new_value):
             if heater == self.printing_selected_heater:
@@ -2038,10 +2136,35 @@ class DisplayController:
                 except asyncio.CancelledError:
                     pass
         
+        if self._cleanup_task and not self._cleanup_task.done():
+            self._cleanup_task.cancel()
+            try:
+                await self._cleanup_task
+            except asyncio.CancelledError:
+                pass
+        self._cleanup_task = None
+
+        if self._speed_ui_task and not self._speed_ui_task.done():
+            self._speed_ui_task.cancel()
+        self._speed_ui_task = None
+
+        if self._ips_retry_task and not self._ips_retry_task.done():
+            self._ips_retry_task.cancel()
+        self._ips_retry_task = None
+
+        if self._update_data_task and not self._update_data_task.done():
+            self._update_data_task.cancel()
+        self._update_data_task = None
+        self._pending_update_data = None
+
+        if self._http_session and not self._http_session.closed:
+            await self._http_session.close()
+        self._http_session = None
+
         if self.writer:
             self.writer.close()
             await self.writer.wait_closed()
-        
+
         await self.resources.cleanup()
 
     async def handle_screw_leveling(self):
