@@ -299,6 +299,7 @@ class DisplayController:
         self._thumbnail_task = None
         self._speed_ui_task = None
         self._update_data_task = None
+        self._ips_retry_task = None
         self._pending_update_data = None
 
         self._is_reconnecting = False
@@ -1413,16 +1414,35 @@ class DisplayController:
             # Don't crash - we're already connected and can function
 
         # Get system info - also wrapped for safety
+        if not await self._refresh_ips():
+            # Network may not be up yet on first boot - keep retrying in the
+            # background so the IP appears without needing a service restart.
+            if self._ips_retry_task is None or self._ips_retry_task.done():
+                self._ips_retry_task = self._loop.create_task(self._retry_refresh_ips())
+
+    async def _refresh_ips(self) -> bool:
+        """Fetch the machine's IP addresses from Moonraker. Returns True if any were found."""
         try:
             system_response = await self._send_moonraker_request("machine.system_info")
             if "result" in system_response:
                 system = system_response["result"]["system_info"]
-                self.display.ips = ", ".join(self._find_ips(system["network"]))
+                ips = self._find_ips(system["network"])
+                if ips:
+                    self.display.ips = ", ".join(ips)
+                    return True
             else:
                 logger.warning("Could not retrieve system info")
         except Exception as e:
             logger.error(f"Error getting system info: {e}")
             # Continue anyway - not critical
+        return False
+
+    async def _retry_refresh_ips(self) -> None:
+        for _ in range(12):  # retry for up to a minute
+            await asyncio.sleep(5)
+            if await self._refresh_ips():
+                return
+        logger.warning("Gave up waiting for network IP address after retries")
 
     def _make_rpc_msg(self, method: str, **kwargs):
         msg = {"jsonrpc": "2.0", "method": method}
@@ -2127,6 +2147,10 @@ class DisplayController:
         if self._speed_ui_task and not self._speed_ui_task.done():
             self._speed_ui_task.cancel()
         self._speed_ui_task = None
+
+        if self._ips_retry_task and not self._ips_retry_task.done():
+            self._ips_retry_task.cancel()
+        self._ips_retry_task = None
 
         if self._update_data_task and not self._update_data_task.done():
             self._update_data_task.cancel()
