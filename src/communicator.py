@@ -32,8 +32,7 @@ class DisplayCommunicator:
         self._write_lock = asyncio.Lock()
 
         # Ensure TJCClient is properly instantiated
-        self.display = TJCClient(port, baudrate, event_handler)
-        self.display.encoding = "utf-8"
+        self.display = TJCClient(port, baudrate, event_handler, encoding="utf-8")
 
     async def connect(self):
         try:
