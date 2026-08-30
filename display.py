@@ -2111,7 +2111,14 @@ class DisplayController:
             self._rapid_scan_mode = True
             self.bed_leveling_probed_count = 0
             self.bed_leveling_last_position = None
-            self._bed_leveling_complete = False
+            # Mark complete up front rather than waiting for the explicit
+            # completion message below - rapid-scan probes don't reliably send
+            # "// Mesh Bed Leveling Complete" or the scanning-path completion
+            # text, which left this flag stuck False and the navigation guard
+            # in _navigate_to_page() blocking the screen on this page forever
+            # (see #62). The completion branch still runs normally and updates
+            # the visualization if the message does arrive.
+            self._bed_leveling_complete = True
             # Reset leveling_mode for KAMP during printing
             if self.current_state in ("printing", "paused"):
                 self.leveling_mode = None
@@ -2156,7 +2163,14 @@ class DisplayController:
                     )
                 )
 
-        elif response.startswith("// Mesh Bed Leveling Complete") or "Collecting samples along the scanning path completed" in response:
+        elif (
+            response.startswith("// Mesh Bed Leveling Complete")
+            or "Collecting samples along the scanning path completed" in response
+            # cartographer-klipper's scanner.py (scan mode) reports its own
+            # completion this way instead of either message above - without
+            # this, _bed_leveling_complete never clears for that probe/plugin
+            or "Mesh calibration complete" in response
+        ):
             # If rapid scan mode was active, show completion
             # Draw boxes if we received probe counts (some probes send both rapid scan AND counts)
             if self._rapid_scan_mode:
