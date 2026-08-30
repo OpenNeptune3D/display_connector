@@ -76,3 +76,36 @@ async def test_pre_fix_behavior_would_freeze_navigation(controller):
     await controller._navigate_to_page(PAGE_PRINTING_COMPLETE)
 
     assert controller.history[-1] == PAGE_PRINTING_KAMP
+
+
+@pytest.mark.asyncio
+async def test_cartographer_klipper_scan_mode_completion_marks_bed_leveling_complete(controller):
+    # cartographer-klipper's scanner.py (the original Cartographer plugin, in
+    # scan mode) reports mesh completion with this text instead of either
+    # message this module otherwise checks for - without recognizing it,
+    # _bed_leveling_complete is left stuck False for that plugin. The flag is
+    # only ever set from this branch while parked on printing_kamp.
+    controller.history = [PAGE_PRINTING_KAMP]
+    controller._bed_leveling_complete = False
+
+    await controller.handle_gcode_response("Mesh calibration complete")
+
+    assert controller._bed_leveling_complete is True
+
+
+@pytest.mark.asyncio
+async def test_cartographer_klipper_scan_completion_clears_flag_set_by_kamp(controller):
+    # End-to-end reproduction of the freeze actually seen on hardware: KAMP's
+    # adaptive-meshing macro parks the screen on printing_kamp and marks
+    # leveling incomplete, then cartographer-klipper's scan-mode completion
+    # message must be recognized to clear it again.
+    await controller.handle_gcode_response(
+        "// Adapted mesh bounds: (80.0417, 80.0), (154.958, 155.0)."
+    )
+    await asyncio.sleep(0)
+    controller.history = [PAGE_PRINTING_KAMP]
+    assert controller._bed_leveling_complete is False
+
+    await controller.handle_gcode_response("Mesh calibration complete")
+
+    assert controller._bed_leveling_complete is True

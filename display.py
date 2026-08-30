@@ -2163,7 +2163,14 @@ class DisplayController:
                     )
                 )
 
-        elif response.startswith("// Mesh Bed Leveling Complete") or "Collecting samples along the scanning path completed" in response:
+        elif (
+            response.startswith("// Mesh Bed Leveling Complete")
+            or "Collecting samples along the scanning path completed" in response
+            # cartographer-klipper's scanner.py (scan mode) reports its own
+            # completion this way instead of either message above - without
+            # this, _bed_leveling_complete never clears for that probe/plugin
+            or "Mesh calibration complete" in response
+        ):
             # If rapid scan mode was active, show completion
             # Draw boxes if we received probe counts (some probes send both rapid scan AND counts)
             if self._rapid_scan_mode:
