@@ -33,7 +33,7 @@ class DisplayCommunicator:
 
         # Ensure TJCClient is properly instantiated
         self.display = TJCClient(port, baudrate, event_handler)
-        self.display.encoding = "utf-8"
+        self.display._encoding = "utf-8"
 
     async def connect(self):
         try:
