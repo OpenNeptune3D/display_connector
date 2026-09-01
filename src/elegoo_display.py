@@ -800,9 +800,11 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
     async def show_shutdown_screens(self):
         await self.show_initial_shutdown_screen()
         # Need to use this method here, because once we send the delay, the display won't respond anymore
-        self.display.write_command("delay=8000")
-        self.display.write_command("cls BLACK")
-        self.display.write_command(
-            'xstr 24,220,224,20,1,54150,0,1,1,1,"It\'s now safe to turn off"'
+        self.display._write_command_raw(b"delay=8000\xff\xff\xff")
+        self.display._write_command_raw(b"cls BLACK\xff\xff\xff")
+        self.display._write_command_raw(
+            b'xstr 24,220,224,20,1,54150,0,1,1,1,"It\'s now safe to turn off"\xff\xff\xff'
         )
-        self.display.write_command('xstr 24,240,224,20,1,54150,0,1,1,1,"your printer."')
+        self.display._write_command_raw(
+            b'xstr 24,240,224,20,1,54150,0,1,1,1,"your printer."\xff\xff\xff'
+        )
