@@ -171,7 +171,7 @@ class DisplayCommunicator:
                         if mapping_leaf.field_type == "txt"
                         else f"{mapped_key}.{mapping_leaf.field_type}={formatted}"
                     )
-                    await self.write(command)
+                    await self.write(command.replace(chr(176), ""))
                     await asyncio.sleep(0.05)  # Small delay to ensure each command is processed
             except Exception as e:
                 # Log but continue processing other mappings
