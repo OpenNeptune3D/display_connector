@@ -1,5 +1,7 @@
 import asyncio
+import time
 from logging import Logger
+from src.display_text import DisplayEncodingError, ascii_display_command
 from src.tjc import TJCClient
 from nextion.exceptions import CommandFailed
 
@@ -32,8 +34,25 @@ class DisplayCommunicator:
         self._write_lock = asyncio.Lock()
 
         # Ensure TJCClient is properly instantiated
-        self.display = TJCClient(port, baudrate, event_handler)
-        self.display.encoding = "utf-8"
+        self.display = TJCClient(port, baudrate, event_handler, encoding="ascii")
+        self._text_fallback_reported = False
+        self._encoding_error_last_logged = None
+        self._encoding_errors_suppressed = 0
+
+    def _report_encoding_error(self, error):
+        # Bound repeated malformed-command diagnostics without hiding other
+        # failures, such as timeouts, disconnects or unexpected exceptions.
+        now = time.monotonic()
+        if (self._encoding_error_last_logged is None
+                or now - self._encoding_error_last_logged >= 60):
+            self.logger.warning(
+                "Display encoding error: %s (%d similar errors suppressed)",
+                error, self._encoding_errors_suppressed,
+            )
+            self._encoding_error_last_logged = now
+            self._encoding_errors_suppressed = 0
+        else:
+            self._encoding_errors_suppressed += 1
 
     async def connect(self):
         try:
@@ -45,11 +64,19 @@ class DisplayCommunicator:
     async def _execute_command(self, data, timeout=None):
         """Execute a display command directly without queueing logic."""
         try:
+            serial_data = ascii_display_command(data)
+            if serial_data != data and not self._text_fallback_reported:
+                self.logger.info(
+                    "Display text uses ASCII fallback for unsupported glyphs"
+                )
+                self._text_fallback_reported = True
             effective_timeout = self.timeout if timeout is None else timeout
             await asyncio.wait_for(
-                self.display.command(data, effective_timeout),
+                self.display.command(serial_data, effective_timeout),
                 timeout=effective_timeout + 1  # slight cushion over device timeout
             )
+        except (DisplayEncodingError, UnicodeEncodeError) as e:
+            self._report_encoding_error(e)
         except asyncio.TimeoutError:
             self.logger.warning(f"Display write timed out for command: {data}")
             # Quick, robust recovery: re-sync the panel and bail out of this burst
