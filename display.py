@@ -88,6 +88,7 @@ signal.signal(signal.SIGTERM, signal_handler)
 signal.signal(signal.SIGINT, signal_handler)
 
 log_file = os.path.expanduser("~/printer_data/logs/display_connector.log")
+os.makedirs(os.path.dirname(log_file), exist_ok=True)
 logger = logging.getLogger(__name__)
 ch_log = logging.StreamHandler(sys.stdout)
 ch_log.setLevel(logging.DEBUG)
@@ -1175,6 +1176,7 @@ class DisplayController:
                             "extruder": ["temperature", "target"],
                             "heater_generic heater_bed_outer": ["temperature", "target"],
                             "display_status": ["progress"],
+                            "bed_mesh": ["profile_name"],
                             "print_stats": [
                                 "state",
                                 "print_duration",
@@ -1921,7 +1923,31 @@ class DisplayController:
         if "print_duration" in new_data.get("print_stats", {}):
             self.current_print_duration = new_data["print_stats"]["print_duration"]
 
+        if "bed_mesh" in new_data:
+            if self._rapid_scan_mode or current_page == PAGE_PRINTING_KAMP:
+                logger.info("Bed mesh update received from Moonraker - bed leveling complete")
+                if self._rapid_scan_mode:
+                    self._loop.create_task(
+                        self.display.update_kamp_text("Scan complete!")
+                    )
+                self.bed_leveling_probed_count = 0
+                self.bed_leveling_counts = self.full_bed_leveling_counts
+                self._rapid_scan_mode = False
+                self._bed_leveling_complete = True
+                if self.leveling_mode == "full_bed" and self.current_state not in ("printing", "paused"):
+                    self._loop.create_task(self.display.show_bed_mesh_final())
+                else:
+                    self._loop.create_task(self._handle_bed_leveling_complete())
+
         progress = new_data.get("display_status", {}).get("progress", 0)
+        if progress > 0.001 and current_page == PAGE_PRINTING_KAMP:
+            logger.info("Print progress > 0 while on KAMP page - restoring printing page")
+            self.bed_leveling_probed_count = 0
+            self.bed_leveling_counts = self.full_bed_leveling_counts
+            self._rapid_scan_mode = False
+            self._bed_leveling_complete = True
+            self._loop.create_task(self._handle_bed_leveling_complete())
+
         try:
             if progress > 0.001 and "print_duration" in new_data.get("print_stats", {}):
                 total_time = self.current_print_duration / progress
@@ -2156,7 +2182,14 @@ class DisplayController:
                     )
                 )
 
-        elif response.startswith("// Mesh Bed Leveling Complete") or "Collecting samples along the scanning path completed" in response:
+        elif (
+            response.startswith("// Mesh Bed Leveling Complete")
+            or "Collecting samples along the scanning path completed" in response
+            or "Mesh calibration complete" in response
+            or response.startswith("// Smart Park location")
+            or "KAMP purge" in response
+            or "LINE_PURGE" in response
+        ):
             # If rapid scan mode was active, show completion
             # Draw boxes if we received probe counts (some probes send both rapid scan AND counts)
             if self._rapid_scan_mode:
