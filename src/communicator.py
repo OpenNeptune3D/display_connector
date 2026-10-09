@@ -1,4 +1,5 @@
 import asyncio
+from collections import deque
 from logging import Logger
 from src.tjc import TJCClient
 from nextion.exceptions import CommandFailed
@@ -25,11 +26,14 @@ class DisplayCommunicator:
 
         self.current_data = {}
         self.blocked_by = None
-        self.blocked_buffer = []
+        self.blocked_buffer = deque()
         self.ips = "--"
-        
-        # ADD: Lock for write operations
-        self._write_lock = asyncio.Lock()
+
+        self._write_lock = asyncio.Lock()  # guards queue/block state only
+        self._serial_lock = asyncio.Lock()  # serialises actual serial I/O
+        # Serialises concurrent navigate_to() calls: same blocked_key bypass in write()
+        # means two simultaneous nav tasks would both execute and interleave serial bytes.
+        self._nav_lock = asyncio.Lock()
 
         # Ensure TJCClient is properly instantiated
         self.display = TJCClient(port, baudrate, event_handler)
@@ -41,6 +45,9 @@ class DisplayCommunicator:
         except Exception as e:
             self.logger.error(f"Failed to connect to display: {str(e)}")
             raise
+        async with self._write_lock:
+            self.blocked_by = None
+            self.blocked_buffer.clear() 
 
     async def _execute_command(self, data, timeout=None):
         """Execute a display command directly without queueing logic."""
@@ -80,9 +87,10 @@ class DisplayCommunicator:
             if blocked_key and not self.blocked_by:
                 self.blocked_by = blocked_key
 
-        # Execute the command outside the lock
+        # Execute outside the queue-state lock, but serialised against other serial writes
         try:
-            await self._execute_command(data, timeout)
+            async with self._serial_lock:
+                await self._execute_command(data, timeout)
         finally:
             # If this was a blocking op, release block and send the next queued command (if any)
             if blocked_key and auto_unblock:
@@ -101,13 +109,14 @@ class DisplayCommunicator:
             async with self._write_lock:
                 # Only process queue if no one else has claimed the block
                 if not self.blocked_by and self.blocked_buffer:
-                    next_item = self.blocked_buffer.pop(0)
+                    next_item = self.blocked_buffer.popleft()
                 else:
                     break
 
             if next_item:
                 data, timeout = next_item
-                await self._execute_command(data, timeout)
+                async with self._serial_lock:
+                    await self._execute_command(data, timeout)
             else:
                 break
         
@@ -126,12 +135,12 @@ class DisplayCommunicator:
         return current
 
     async def navigate_to(self, page_id):
-        # Block other writes while we switch pages
-        try:
-            await self.write(f"page {page_id}", blocked_key="__nav__", auto_unblock=False)
-            await asyncio.sleep(0.25)  # give the HMI time to swap pages
-        finally:
-            await self.unblock("__nav__")
+        async with self._nav_lock:
+            try:
+                await self.write(f"page {page_id}", blocked_key="__nav__", auto_unblock=False)
+                await asyncio.sleep(0.25)  # give the HMI time to swap pages
+            finally:
+                await self.unblock("__nav__")
 
     async def update_data(self, new_data, data_mapping=None, current_data=None):
         if data_mapping is None:
@@ -149,7 +158,7 @@ class DisplayCommunicator:
 
     async def _update_data_recursive(self, new_data, data_mapping, current_data):
         is_dict = isinstance(new_data, dict)
-        keys_to_iterate = list(new_data.keys()) if is_dict else range(len(new_data))
+        keys_to_iterate = new_data.keys() if is_dict else range(len(new_data))
         
         for key in keys_to_iterate:
             if key in data_mapping:
@@ -172,7 +181,6 @@ class DisplayCommunicator:
                         else f"{mapped_key}.{mapping_leaf.field_type}={formatted}"
                     )
                     await self.write(command)
-                    await asyncio.sleep(0.05)  # Small delay to ensure each command is processed
             except Exception as e:
                 # Log but continue processing other mappings
                 self.logger.debug(f"Failed to update display leaf: {e}")
