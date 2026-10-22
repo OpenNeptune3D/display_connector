@@ -1683,7 +1683,8 @@ class DisplayController:
 
     def find_best_thumbnail(self, metadata):
         best_thumbnail = None
-        for thumbnail in metadata["thumbnails"]:
+        # Files sliced without thumbnails (e.g. OrcaSlicer CLI) have no "thumbnails" key at all
+        for thumbnail in (metadata or {}).get("thumbnails") or []:
             if thumbnail["width"] == 160:
                 return thumbnail
             if best_thumbnail is None or thumbnail["width"] > best_thumbnail["width"]:
