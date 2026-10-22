@@ -3,6 +3,15 @@ from logging import Logger
 from src.tjc import TJCClient
 from nextion.exceptions import CommandFailed
 
+def _deep_merge(dst, src):
+    """Merge a (partial) Moonraker status update into the stored state, in place."""
+    for key, value in src.items():
+        if isinstance(value, dict) and isinstance(dst.get(key), dict):
+            _deep_merge(dst[key], value)
+        else:
+            dst[key] = value
+
+
 class DisplayCommunicator:
     def __init__(
         self,
@@ -138,9 +147,11 @@ class DisplayCommunicator:
             data_mapping = self.data_mapping  # Ensure `self.data_mapping` is set elsewhere
         if current_data is None:
             current_data = self.current_data
-            if not current_data:
-                self.current_data = new_data
-        
+            # Keep the latest value of every field: formatters with required_fields (e.g. layer
+            # "current/total") read them from here. Merging first also means fields arriving in
+            # the same update (current_layer + total_layer) see each other's new value.
+            _deep_merge(current_data, new_data)
+
         try:
             await self._update_data_recursive(new_data, data_mapping, current_data)
         except Exception as e:
