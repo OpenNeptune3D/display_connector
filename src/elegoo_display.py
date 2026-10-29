@@ -325,7 +325,7 @@ class ElegooDisplayMapper(Mapper):
         }
 
 class ElegooDisplayCommunicator(DisplayCommunicator):
-    supported_firmware_versions = ["1.2.11", "1.2.12", "1.2.13", "1.2.14", "1.2.14.1", "1.2.16", "1.2.17", "1.2.18"]
+    supported_firmware_versions = ["1.2.11", "1.2.12", "1.2.13", "1.2.14", "1.2.14.1", "1.2.16", "1.2.17", "1.2.18", "1.2.22"]
 
     def __init__(self, logger: Logger, model: str, port: str, event_handler, baudrate: int = 115200, timeout: int = 5):
         # Call the base class constructor
@@ -410,8 +410,10 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
                 + ',1,1,1,"github.com/OpenNeptune3D"'
             )
         elif current_page == PAGE_LIGHTS:
-            await self.write("t0.txt=\"Part Light\"")
-            await self.write("t1.txt=\"Frame Light\"")
+            # Label writes intentionally disabled: writing English literals to t0/t1
+            # breaks non-English TFT locales. Re-enable only with locale-aware labels
+            # or after moving labels fully into the TFT assets.
+            pass
         elif current_page == PAGE_PRINTING:
             await self.write("printvalue.xcen=0")
             await self.write("move printvalue,13,267,13,267,0,10")
@@ -555,14 +557,17 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
         )
 
     async def update_wifi_ui(self):
-        # Use cached WiFi status if checked recently
-        current_time = time.time()
-        if self._cached_wifi_status is not None and (current_time - self._last_wifi_check) < self._wifi_check_interval:
-            has_wifi, ssid, rssi_category = self._cached_wifi_status
-        else:
-            has_wifi, ssid, rssi_category = await asyncio.to_thread(get_wlan0_status)
-            self._cached_wifi_status = (has_wifi, ssid, rssi_category)
-            self._last_wifi_check = current_time
+        try:
+            current_time = time.time()
+            if self._cached_wifi_status is not None and (current_time - self._last_wifi_check) < self._wifi_check_interval:
+                has_wifi, ssid, rssi_category = self._cached_wifi_status
+            else:
+                has_wifi, ssid, rssi_category = await asyncio.to_thread(get_wlan0_status)
+                self._cached_wifi_status = (has_wifi, ssid, rssi_category)
+                self._last_wifi_check = current_time
+        except Exception:
+            self.logger.debug("Failed to update WiFi UI", exc_info=True)
+            return False
 
         if not has_wifi:
             await self.write("picq 230,0,42,42,214")
