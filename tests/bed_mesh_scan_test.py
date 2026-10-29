@@ -148,3 +148,32 @@ async def test_touch_home_followed_by_smart_park_ends_on_printing_page(controlle
     assert controller._rapid_scan_mode is False
     assert controller.history[-1] == PAGE_PRINTING
     assert controller.display.navigate_to.await_args_list[-1].args[0] == controller.display.mapper.map_page(PAGE_PRINTING)
+
+
+@pytest.mark.asyncio
+async def test_touch_home_after_completed_scan_does_not_show_kamp(controller):
+    controller.history = [PAGE_PRINTING]
+    controller.current_state = "printing"
+
+    # Cartographer scan finishes without ever announcing its start
+    await controller.handle_gcode_response("Collecting samples along the scanning path completed in 4.45 seconds")
+    await asyncio.sleep(0.05)
+    assert controller._mesh_completed_this_print is True
+
+    # Touch home afterwards must not jump to the KAMP page again
+    await controller.handle_gcode_response("Touch home at (112.500, 112.500) adjusted z by 0.010 mm")
+    await asyncio.sleep(0.05)
+
+    assert controller._rapid_scan_mode is False
+    assert controller.history[-1] == PAGE_PRINTING
+
+
+@pytest.mark.asyncio
+async def test_mesh_completed_flag_resets_after_print(controller):
+    controller.current_state = "printing"
+    controller._mesh_completed_this_print = True
+
+    await controller.handle_status_update({"print_stats": {"state": "complete"}})
+    await asyncio.sleep(0.05)
+
+    assert controller._mesh_completed_this_print is False

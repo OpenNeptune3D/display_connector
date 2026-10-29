@@ -103,6 +103,8 @@ class StatusMixin:
                 state = new_data["print_stats"].get("state")
                 if state:
                     self.current_state = state
+                    if state not in ("printing", "paused"):
+                        self._mesh_completed_this_print = False
                     logger.info(f"Status Update: {state}")
                     state_to_process = state
                     
@@ -216,6 +218,8 @@ class StatusMixin:
         # profile name means a new mesh is actually loaded.
         bed_mesh_loaded = bool(new_data.get("bed_mesh", {}).get("profile_name"))
         if bed_mesh_loaded:
+            if self.current_state in ("printing", "paused"):
+                self._mesh_completed_this_print = True
             if self._rapid_scan_mode or current_page == PAGE_PRINTING_KAMP:
                 logger.info("Bed mesh update received from Moonraker - bed leveling complete")
                 if self._rapid_scan_mode:

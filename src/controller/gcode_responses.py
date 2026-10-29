@@ -79,6 +79,10 @@ class GcodeResponseMixin:
             current_page = await self._get_current_page()
             if current_page != PAGE_PRINTING_KAMP:
                 self._loop.create_task(self._navigate_to_page(PAGE_PRINTING_KAMP, clear_history=True))
+        elif "Touch home at" in response and self._mesh_completed_this_print:
+            # Cartographer touches after the scan; the mesh is already done,
+            # so don't flash the KAMP page again.
+            logger.debug("Touch home after completed bed mesh - not a new scan")
         elif "Beginning rapid surface scan" in response or "Touch home at" in response:
             # Rapid scan mode (Eddy/Cartographer/Beacon) - these probes don't send
             # "Adapted mesh bounds" or "probe: at" messages, so we handle everything here
@@ -152,6 +156,12 @@ class GcodeResponseMixin:
             self.bed_leveling_probed_count = 0
             self.bed_leveling_counts = self.full_bed_leveling_counts
             self._rapid_scan_mode = False
+            if self.current_state in ("printing", "paused") and (
+                response.startswith("// Mesh Bed Leveling Complete")
+                or "Collecting samples along the scanning path completed" in response
+                or "Mesh calibration complete" in response
+            ):
+                self._mesh_completed_this_print = True
 
             current_page = await self._get_current_page()
             if current_page == PAGE_PRINTING_KAMP:
