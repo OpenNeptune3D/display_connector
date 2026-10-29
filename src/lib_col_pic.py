@@ -171,8 +171,6 @@ def _colpic_encode(
     if HEADER_SIZE + list_data_size + 2 > outputmaxsize:
         return 0
 
-    outputdata[:outputmaxsize] = b"\x00" * outputmaxsize
-
     outputdata[0] = 3
     outputdata[4:8] = int(picw).to_bytes(4, 'little')
     outputdata[8:12] = int(pich).to_bytes(4, 'little')

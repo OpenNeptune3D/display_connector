@@ -1,5 +1,5 @@
 import logging
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.communicator import DisplayCommunicator
@@ -34,3 +34,19 @@ async def test_navigate(communicator):
         blocked_key="__nav__",
         auto_unblock=False,
     )
+
+
+@pytest.mark.asyncio
+async def test_update_data_keeps_latest_status(communicator):
+    # Partial Moonraker updates must be merged, so required_fields formatters see current values
+    communicator.data_mapping = {}
+    await communicator.update_data({"print_stats": {"info": {"total_layer": 125, "current_layer": 0}}})
+    await communicator.update_data({"print_stats": {"info": {"current_layer": 13}}})
+    assert communicator.current_data == {"print_stats": {"info": {"total_layer": 125, "current_layer": 13}}}
+
+
+def test_encoding_is_passed_to_client_constructor():
+    # nextion 3.x reads the encoding only at construction; setting .encoding afterwards is a no-op
+    with patch("src.communicator.TJCClient") as client:
+        DisplayCommunicator(logging, "N4", "/dev/not-opened", None)
+    client.assert_called_once_with("/dev/not-opened", 115200, None, encoding="utf-8")
