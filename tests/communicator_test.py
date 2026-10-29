@@ -34,3 +34,12 @@ async def test_navigate(communicator):
         blocked_key="__nav__",
         auto_unblock=False,
     )
+
+
+@pytest.mark.asyncio
+async def test_update_data_keeps_latest_status(communicator):
+    # Partial Moonraker updates must be merged, so required_fields formatters see current values
+    communicator.data_mapping = {}
+    await communicator.update_data({"print_stats": {"info": {"total_layer": 125, "current_layer": 0}}})
+    await communicator.update_data({"print_stats": {"info": {"current_layer": 13}}})
+    assert communicator.current_data == {"print_stats": {"info": {"total_layer": 125, "current_layer": 13}}}
