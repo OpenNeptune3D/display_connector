@@ -92,7 +92,11 @@ class GcodeResponseMixin:
             logger.info("Rapid scan mode detected - using simplified visualization")
             current_page = await self._get_current_page()
             if current_page != PAGE_PRINTING_KAMP:
-                self._loop.create_task(self._navigate_to_page(PAGE_PRINTING_KAMP, clear_history=True))
+                # Await instead of scheduling: Cartographer can send "Touch home at"
+                # right before a completion message (e.g. Smart Park, ~5 ms later).
+                # A background task would race with the return to the printing
+                # page and leave the display stuck on the KAMP screen.
+                await self._navigate_to_page(PAGE_PRINTING_KAMP, clear_history=True)
             self._loop.create_task(
                 self.display.update_kamp_text("Scanning bed surface...")
             )

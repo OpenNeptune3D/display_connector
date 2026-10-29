@@ -128,3 +128,23 @@ async def test_bed_mesh_cleared_at_scan_start_does_not_complete_leveling(control
 
     assert controller._rapid_scan_mode is False
     assert controller.history[-1] == PAGE_PRINTING
+
+
+@pytest.mark.asyncio
+async def test_touch_home_followed_by_smart_park_ends_on_printing_page(controller):
+    controller.history = [PAGE_PRINTING]
+    controller.current_state = "printing"
+
+    async def slow_navigate(page):
+        await asyncio.sleep(0.02)
+
+    controller.display.navigate_to = AsyncMock(side_effect=slow_navigate)
+
+    # Cartographer touches after the scan; Smart Park follows a few ms later
+    await controller.handle_gcode_response("Touch home at (112.500, 112.500) adjusted z by 0.011 mm")
+    await controller.handle_gcode_response("// Smart Park location: 85.502,85.501.")
+    await asyncio.sleep(0.2)
+
+    assert controller._rapid_scan_mode is False
+    assert controller.history[-1] == PAGE_PRINTING
+    assert controller.display.navigate_to.await_args_list[-1].args[0] == controller.display.mapper.map_page(PAGE_PRINTING)
