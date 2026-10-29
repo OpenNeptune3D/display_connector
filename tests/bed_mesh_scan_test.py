@@ -106,3 +106,25 @@ async def test_legacy_cartographer_scan_complete_message(controller):
 
     assert controller._rapid_scan_mode is False
     assert controller.history[-1] == PAGE_PRINTING
+
+
+@pytest.mark.asyncio
+async def test_bed_mesh_cleared_at_scan_start_does_not_complete_leveling(controller):
+    controller.history = [PAGE_PRINTING]
+    controller.current_state = "printing"
+
+    # Cartographer starts scanning, then Klipper clears the old mesh
+    await controller.handle_gcode_response("Touch home at (239.750, 194.550) adjusted z by -0.067 mm")
+    await controller.handle_status_update({"bed_mesh": {"profile_name": ""}})
+    await asyncio.sleep(0.05)
+
+    assert controller._rapid_scan_mode is True
+    assert controller._bed_leveling_complete is False
+    assert controller.history[-1] == PAGE_PRINTING_KAMP
+
+    # The new mesh is loaded once the scan is done
+    await controller.handle_status_update({"bed_mesh": {"profile_name": "default"}})
+    await asyncio.sleep(0.05)
+
+    assert controller._rapid_scan_mode is False
+    assert controller.history[-1] == PAGE_PRINTING

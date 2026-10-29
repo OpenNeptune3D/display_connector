@@ -211,7 +211,11 @@ class StatusMixin:
         if "print_duration" in new_data.get("print_stats", {}):
             self.current_print_duration = new_data["print_stats"]["print_duration"]
 
-        if "bed_mesh" in new_data:
+        # Klipper clears the active mesh when BED_MESH_CALIBRATE starts, which
+        # pushes profile_name="" right after the scan begins. Only a non-empty
+        # profile name means a new mesh is actually loaded.
+        bed_mesh_loaded = bool(new_data.get("bed_mesh", {}).get("profile_name"))
+        if bed_mesh_loaded:
             if self._rapid_scan_mode or current_page == PAGE_PRINTING_KAMP:
                 logger.info("Bed mesh update received from Moonraker - bed leveling complete")
                 if self._rapid_scan_mode:
