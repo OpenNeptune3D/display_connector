@@ -277,10 +277,13 @@ class NavigationMixin:
 
     async def _get_current_page(self):
         """Get current page safely with timeout protection"""
+        async def locked():
+            async with self._history_lock:
+                return await self._get_current_page_unsafe()
+
         try:
-            async with asyncio.timeout(5.0):
-                async with self._history_lock:
-                    return await self._get_current_page_unsafe()
+            # asyncio.timeout() needs Python 3.11; wait_for works on every supported version
+            return await asyncio.wait_for(locked(), timeout=5.0)
         except asyncio.TimeoutError:
             logger.error("DEADLOCK DETECTED in _get_current_page() - lock timeout after 5s")
             import traceback
