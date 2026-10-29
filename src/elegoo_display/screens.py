@@ -182,9 +182,17 @@ class ElegooScreensMixin:
     async def show_shutdown_screens(self):
         await self.show_initial_shutdown_screen()
         # Need to use this method here, because once we send the delay, the display won't respond anymore
-        self.display.write_command("delay=8000")
-        self.display.write_command("cls BLACK")
-        self.display.write_command(
+        self._write_without_response("delay=8000")
+        self._write_without_response("cls BLACK")
+        self._write_without_response(
             'xstr 24,220,224,20,1,54150,0,1,1,1,"It\'s now safe to turn off"'
         )
-        self.display.write_command('xstr 24,240,224,20,1,54150,0,1,1,1,"your printer."')
+        self._write_without_response('xstr 24,240,224,20,1,54150,0,1,1,1,"your printer."')
+
+    def _write_without_response(self, command):
+        # nextion 3.x replaced write_command() with _write_command_raw(), which takes bytes.
+        # Both write straight to the port and append the FF FF FF terminator themselves.
+        if hasattr(self.display, "_write_command_raw"):
+            self.display._write_command_raw(command.encode("utf-8"))
+        else:
+            self.display.write_command(command)
