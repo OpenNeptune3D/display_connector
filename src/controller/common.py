@@ -45,6 +45,7 @@ def setup_logging():
     ch_log.setLevel(logging.DEBUG)
     ch_log.setFormatter(formatter)
     logger.addHandler(ch_log)
+    os.makedirs(os.path.dirname(log_file), exist_ok=True)
     file_log.setLevel(logging.ERROR)
     file_log.setFormatter(formatter)
     logger.addHandler(file_log)

@@ -60,6 +60,7 @@ class ListenerMixin:
                             "extruder": ["temperature", "target"],
                             "heater_generic heater_bed_outer": ["temperature", "target"],
                             "display_status": ["progress"],
+                            "bed_mesh": ["profile_name"],
                             "print_stats": [
                                 "state",
                                 "print_duration",

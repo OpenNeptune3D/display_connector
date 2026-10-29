@@ -7,6 +7,7 @@ from src.mapping import (
     PAGE_MAIN,
     PAGE_PRINTING,
     PAGE_PRINTING_COMPLETE,
+    PAGE_PRINTING_KAMP,
     PAGE_OVERLAY_LOADING,
     format_time,
 )
@@ -210,7 +211,31 @@ class StatusMixin:
         if "print_duration" in new_data.get("print_stats", {}):
             self.current_print_duration = new_data["print_stats"]["print_duration"]
 
+        if "bed_mesh" in new_data:
+            if self._rapid_scan_mode or current_page == PAGE_PRINTING_KAMP:
+                logger.info("Bed mesh update received from Moonraker - bed leveling complete")
+                if self._rapid_scan_mode:
+                    self._loop.create_task(
+                        self.display.update_kamp_text("Scan complete!")
+                    )
+                self.bed_leveling_probed_count = 0
+                self.bed_leveling_counts = self.full_bed_leveling_counts
+                self._rapid_scan_mode = False
+                self._bed_leveling_complete = True
+                if self.leveling_mode == "full_bed" and self.current_state not in ("printing", "paused"):
+                    self._loop.create_task(self.display.show_bed_mesh_final())
+                else:
+                    self._loop.create_task(self._handle_bed_leveling_complete())
+
         progress = new_data.get("display_status", {}).get("progress", 0)
+        if progress > 0.001 and current_page == PAGE_PRINTING_KAMP:
+            logger.info("Print progress > 0 while on KAMP page - restoring printing page")
+            self.bed_leveling_probed_count = 0
+            self.bed_leveling_counts = self.full_bed_leveling_counts
+            self._rapid_scan_mode = False
+            self._bed_leveling_complete = True
+            self._loop.create_task(self._handle_bed_leveling_complete())
+
         try:
             if progress > 0.001 and "print_duration" in new_data.get("print_stats", {}):
                 total_time = self.current_print_duration / progress

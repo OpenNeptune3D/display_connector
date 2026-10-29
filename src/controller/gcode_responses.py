@@ -130,7 +130,14 @@ class GcodeResponseMixin:
                     )
                 )
 
-        elif response.startswith("// Mesh Bed Leveling Complete") or "Collecting samples along the scanning path completed" in response:
+        elif (
+            response.startswith("// Mesh Bed Leveling Complete")
+            or "Collecting samples along the scanning path completed" in response
+            or "Mesh calibration complete" in response
+            or response.startswith("// Smart Park location")
+            or "KAMP purge" in response
+            or "LINE_PURGE" in response
+        ):
             # If rapid scan mode was active, show completion
             # Draw boxes if we received probe counts (some probes send both rapid scan AND counts)
             if self._rapid_scan_mode:
