@@ -125,6 +125,10 @@ class DisplayController(
         self.bed_leveling_probed_count = 0
         self.bed_leveling_last_position = None
         self._rapid_scan_mode = False
+        # Set once a bed mesh finished during the current print, so a later
+        # touch home (e.g. Cartographer touching after the scan) is not
+        # mistaken for the start of a new scan.
+        self._mesh_completed_this_print = False
 
         self.klipper_restart_event = asyncio.Event()
 
