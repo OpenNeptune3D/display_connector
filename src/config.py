@@ -1,5 +1,8 @@
 import os
+import re
 from configparser import ConfigParser, NoOptionError, NoSectionError
+
+from src.mapping import DEFAULT_CLEAN_FILENAME_REGEX
 
 TEMP_DEFAULTS = {
     "pla": [210, 60],
@@ -8,6 +11,11 @@ TEMP_DEFAULTS = {
     "tpu": [240, 60],
 }
 
+# Value written by earlier versions when creating a new config file. Its capture
+# group only contains the trailing "<layer>_<time>.gcode" part, so the file list
+# showed e.g. "0.2_32m16s.gcode" instead of the model name.
+LEGACY_CLEAN_FILENAME_REGEX = r".*_(.*?_(?:[0-9]+h|[0-9]+m|[0-9]+s)+\.gcode)"
+
 
 class ConfigHandler(ConfigParser):
     def __init__(self, file_path, logger):
@@ -15,6 +23,7 @@ class ConfigHandler(ConfigParser):
         self.logger = logger
         super().__init__(allow_no_value=True)
         self.initialize_config_file()
+        self.migrate_legacy_values()
         self.reload_config()
 
     @property
@@ -37,7 +46,32 @@ class ConfigHandler(ConfigParser):
             return default
         except NoOptionError:
             return default
-        
+
+
+    def migrate_legacy_values(self):
+        """Replace the broken clean_filename_regex default written by earlier versions.
+
+        Only an unchanged legacy value is replaced; user-customized regexes are kept.
+        The file is edited as text so comments and formatting stay untouched.
+        """
+        if not os.path.exists(self.file_path):
+            return
+        try:
+            with open(self.file_path, "r") as configfile:
+                content = configfile.read()
+        except OSError:
+            return
+        pattern = re.compile(
+            r"^(\s*clean_filename_regex\s*[=:]\s*)" + re.escape(LEGACY_CLEAN_FILENAME_REGEX) + r"\s*$",
+            re.MULTILINE,
+        )
+        migrated, count = pattern.subn(
+            lambda m: m.group(1) + DEFAULT_CLEAN_FILENAME_REGEX, content
+        )
+        if count:
+            self.logger.info("Migrating legacy clean_filename_regex to new default")
+            with open(self.file_path, "w") as configfile:
+                configfile.write(migrated)
 
     def initialize_config_file(self):
         if not os.path.exists(self.file_path):
@@ -46,7 +80,7 @@ class ConfigHandler(ConfigParser):
             self.set(
                 "general",
                 "clean_filename_regex",
-                r".*_(.*?_(?:[0-9]+h|[0-9]+m|[0-9]+s)+\.gcode)",
+                DEFAULT_CLEAN_FILENAME_REGEX,
             )
             self.add_section("LOGGING")
             self.set("LOGGING", "file_log_level", "ERROR")
