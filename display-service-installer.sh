@@ -63,10 +63,17 @@ sudo systemctl enable display.service
 sudo systemctl start display.service
 
 # --- Moonraker allowlist update ----------------------------------------------
-# Now Handled by OpenNept4unes install_configs functoin
-#echo "Allowing Moonraker to control display service..."
-#sudo touch "$MOONRAKER_ASVC"
-#grep -qxF 'display' "$MOONRAKER_ASVC" || echo 'display' | sudo tee -a "$MOONRAKER_ASVC" >/dev/null
+# OpenNept4une's install_configs also ships a moonraker.asvc listing display, but
+# Moonraker can't restart the service after an update unless it is listed here.
+echo "Allowing Moonraker to control display service..."
+sudo touch "$MOONRAKER_ASVC"
+if ! grep -qxF 'display' "$MOONRAKER_ASVC"; then
+  # Don't glue the entry onto a last line that has no trailing newline.
+  if [ -s "$MOONRAKER_ASVC" ] && [ -n "$(tail -c1 "$MOONRAKER_ASVC")" ]; then
+    echo | sudo tee -a "$MOONRAKER_ASVC" >/dev/null
+  fi
+  echo 'display' | sudo tee -a "$MOONRAKER_ASVC" >/dev/null
+fi
 
 # --- Restart Moonraker -------------------------------------------------------
 sudo systemctl restart moonraker
