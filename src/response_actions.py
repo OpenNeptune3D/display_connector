@@ -21,6 +21,15 @@ from src.mapping import (
     PAGE_SHUTDOWN_DIALOG,
 )
 
+# Extra touches sent only by the OpenNeptune (Slate) firmware, checked before response_actions
+openneptune_response_actions = {
+    # Main: "Temp" and the nozzle/bed tiles send 5, the light tile sends 6
+    1: {
+        5: "page " + PAGE_PREPARE_TEMP,
+        6: "page " + PAGE_LIGHTS,
+    },
+}
+
 response_actions = {
     # Main
     1: {

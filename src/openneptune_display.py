@@ -1,4 +1,5 @@
 from src.elegoo_display import ElegooDisplayCommunicator
+from src.response_actions import openneptune_response_actions
 from src.mapping import (
     Mapper,
     MappingLeaf,
@@ -320,6 +321,7 @@ class OpenNeptuneDisplayMapper(Mapper):
 
 class OpenNeptuneDisplayCommunicator(ElegooDisplayCommunicator):
     supported_firmware_versions = ["0.1.5"]
+    extra_response_actions = openneptune_response_actions
 
     bed_leveling_box_size = 20
 
