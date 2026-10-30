@@ -14,6 +14,9 @@ def _deep_merge(dst, src):
 
 
 class DisplayCommunicator:
+    # page -> component -> action, for touches only this display's firmware sends
+    extra_response_actions = {}
+
     def __init__(
         self,
         logger: Logger,
