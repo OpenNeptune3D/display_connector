@@ -63,6 +63,8 @@ class ActionsMixin:
             self.send_gcode(gcode)
         elif action == "go_back":
             self._loop.create_task(self._go_back())
+        elif action.startswith("wifi_"):
+            self.handle_wifi_action(action)
         elif action.startswith("page"):
             self._loop.create_task(self._navigate_to_page(action.split(" ")[1]))
         elif action == "emergency_stop":

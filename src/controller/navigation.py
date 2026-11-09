@@ -11,6 +11,7 @@ from src.mapping import (
     PAGE_LEVELING,
     PAGE_LEVELING_SCREW_ADJUST,
     PAGE_LEVELING_Z_OFFSET_ADJUST,
+    PAGE_SETTINGS_WIFI,
     PAGE_CONFIRM_PRINT,
     PAGE_PRINTING,
     PAGE_PRINTING_KAMP,
@@ -79,6 +80,8 @@ class NavigationMixin:
             )
         elif current_page == PAGE_LEVELING:
             self.leveling_mode = None
+        elif current_page == PAGE_SETTINGS_WIFI:
+            await self.show_wifi_settings()
         elif current_page == PAGE_LEVELING_SCREW_ADJUST:
             await self.display.draw_initial_screw_leveling()
             self._loop.create_task(self.handle_screw_leveling())
@@ -103,6 +106,10 @@ class NavigationMixin:
             except asyncio.CancelledError:
                 pass
         
+        if self.display.mapper.map_page(page) is None:
+            logger.info(f"Page {page} is not available on this display firmware")
+            return
+
         # PHASE 1: Check bed leveling block (under lock - DATA ONLY)
         async with self._history_lock:
             current_page = self.history[-1] if self.history else None

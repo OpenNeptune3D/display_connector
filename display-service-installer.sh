@@ -53,6 +53,12 @@ done
 echo "Installing display.service to $DISPLAY_SERVICE_FILE"
 sudo cp "$DISPLAY_CONNECTOR_PATH/display.service" "$DISPLAY_SERVICE_FILE" >/dev/null
 
+# --- WiFi settings permission ------------------------------------------------
+# Lets the touch screen scan for and join WiFi networks through nmcli.
+echo "Installing polkit rule for touch screen WiFi settings..."
+sudo install -D -m 0644 "$DISPLAY_CONNECTOR_PATH/display-connector-wifi.rules" \
+  /etc/polkit-1/rules.d/50-display-connector-wifi.rules || true
+
 # --- Reload systemd ----------------------------------------------------------
 echo "Reloading systemd units..."
 sudo systemctl daemon-reload

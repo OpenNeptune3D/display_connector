@@ -10,6 +10,7 @@ from src.mapping import (
     PAGE_FILES,
     PAGE_PREPARE_MOVE,
     PAGE_PREPARE_EXTRUDER,
+    PAGE_SETTINGS,
     PAGE_SETTINGS_TEMPERATURE_SET,
     PAGE_SETTINGS_ABOUT,
     PAGE_LEVELING,
@@ -32,11 +33,12 @@ from src.colors import (
 )
 from src.wifi import get_wlan0_status
 from src.elegoo_display.screens import ElegooScreensMixin
+from src.elegoo_display.wifi_screens import ElegooWifiScreensMixin
 
 NEXTION_TYPE_TEXT = 116
 
 
-class ElegooDisplayCommunicator(ElegooScreensMixin, DisplayCommunicator):
+class ElegooDisplayCommunicator(ElegooScreensMixin, ElegooWifiScreensMixin, DisplayCommunicator):
     supported_firmware_versions = ["1.2.11", "1.2.12", "1.2.13", "1.2.14", "1.2.14.1", "1.2.16", "1.2.17", "1.2.18", "1.2.22"]
 
     def __init__(self, logger: Logger, model: str, port: str, event_handler, baudrate: int = 115200, timeout: int = 5):
@@ -142,6 +144,8 @@ class ElegooDisplayCommunicator(ElegooScreensMixin, DisplayCommunicator):
                 await self.write("fill 13,47,24,4," + str(self.display_name_line_color))
 
             await self.write(f"xpic {200 if has_wifi else 230},16,30,30,220,200,51")
+        elif current_page == PAGE_SETTINGS:
+            await self.update_settings_page()
         elif current_page == PAGE_SETTINGS_ABOUT:
             await self.write(
                 self.mapper.map_page(PAGE_SETTINGS_ABOUT)
@@ -308,6 +312,10 @@ class ElegooDisplayCommunicator(ElegooScreensMixin, DisplayCommunicator):
         await self.write(
             f'{self.mapper.map_page(PAGE_PREPARE_EXTRUDER)}.b[9].txt="{extrude_speed}"'
         )
+
+    def invalidate_wifi_status(self):
+        """Forget the cached WiFi status so the main page icon is re-read next time."""
+        self._cached_wifi_status = None
 
     async def update_wifi_ui(self):
         try:

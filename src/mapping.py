@@ -15,6 +15,8 @@ PAGE_SETTINGS_TEMPERATURE = "settings_temperature"
 PAGE_SETTINGS_TEMPERATURE_SET = "settings_temperature_set"
 PAGE_SETTINGS_ABOUT = "settings_about"
 PAGE_SETTINGS_ADVANCED = "settings_advanced"
+PAGE_SETTINGS_WIFI = "settings_wifi"
+PAGE_SETTINGS_WIFI_PASSWORD = "settings_wifi_password"
 
 
 PAGE_CONFIRM_PRINT = "confirm_print"

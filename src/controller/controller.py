@@ -35,6 +35,7 @@ from src.controller.listener import ListenerMixin
 from src.controller.display_events import DisplayEventsMixin
 from src.controller.status import StatusMixin
 from src.controller.gcode_responses import GcodeResponseMixin
+from src.controller.wifi_settings import WifiSettingsMixin
 
 
 class DisplayController(
@@ -48,6 +49,7 @@ class DisplayController(
     DisplayEventsMixin,
     StatusMixin,
     GcodeResponseMixin,
+    WifiSettingsMixin,
 ):
     last_config_change = 0
     filament_sensor_name = "filament_sensor"
@@ -94,6 +96,8 @@ class DisplayController(
         self.dir_contents = []
         self.current_dir = ""
         self.files_page = 0
+
+        self._init_wifi_settings()
 
         self.printing_selected_heater = "extruder"
         self.printing_target_temps = {

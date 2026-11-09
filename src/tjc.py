@@ -28,10 +28,19 @@ class EventType(IntEnum):
     STARTUP = 0x88
     SD_CARD_UPGRADE = 0x89
     RECONNECTED = 0x666
+    # Not a real TJC header: text typed on a keyboard page arrives as
+    # 0x70 <page> <component> <text> with no terminator (see TJCProtocol)
+    STRING_INPUT = 0x670
 
 JUNK_DATA = b"Z\xa5\x06\x83\x10>\x01\x00"
 
 class TJCProtocol(NextionProtocol):
+    # Pages whose OK button sends the typed text as 0x70 <page> <component> <text>
+    # without the usual 0xFF 0xFF 0xFF terminator (keybdA, the WiFi password keyboard)
+    TEXT_INPUT_PAGES = {132}
+    # The whole text arrives in one burst, so treat it as complete after this long
+    TEXT_INPUT_SETTLE = 0.15
+
     PACKET_LENGTH_MAP = {
         0x00: 6,  # Nextion Startup
         0x24: 4,  # Serial Buffer Overflow
@@ -58,6 +67,9 @@ class TJCProtocol(NextionProtocol):
         """Process received data and handle messages."""
         self.buffer += data
         while True:
+            if self._text_input_pending():
+                self._schedule_text_input_flush()
+                break
             message, was_keyboard_input = self._extract_packet()
             if message is None:
                 break
@@ -66,6 +78,59 @@ class TJCProtocol(NextionProtocol):
                 self.event_message_handler(message)
             else:
                 self.queue.put_nowait(message)
+
+    def _text_input_pending(self):
+        """Does the buffer start with unterminated keyboard text (0x70 <keyboard page>)?
+
+        A normal 0x70 reply to `get x.txt` is followed by text, which never starts
+        with a keyboard page id byte (they are not valid lead bytes in UTF-8/GB2312).
+        """
+        return (
+            len(self.buffer) >= 2
+            and self.buffer[0] == 0x70
+            and self.buffer[1] in self.TEXT_INPUT_PAGES
+        )
+
+    def _schedule_text_input_flush(self):
+        if getattr(self, "_text_input_timer", None) is not None:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._flush_text_input()
+            return
+        self._text_input_timer = loop.call_later(
+            self.TEXT_INPUT_SETTLE, self._flush_text_input
+        )
+
+    def _flush_text_input(self):
+        """Hand the keyboard text to the event handler once it has all arrived."""
+        self._text_input_timer = None
+        if not self._text_input_pending():
+            return
+        message, eol, rest = self.buffer.partition(self.EOL)
+        if eol:
+            # Another event arrived before the timer fired; its bytes are glued to
+            # the end of the text, up to its terminator. Put them back in the buffer.
+            message, trailing = self._split_trailing_event(message)
+            if trailing:
+                rest = trailing + self.EOL + rest
+        self.buffer = rest
+        self.event_message_handler(message)
+        if self.buffer:
+            self.data_received(b"")
+
+    @staticmethod
+    def _split_trailing_event(message):
+        """Split a touch event (0x65 / 0x67) off the end of keyboard text.
+
+        Typed text is printable ASCII, so these binary patterns can't be part of it.
+        """
+        if len(message) >= 9 and message[-6] == 0x67 and message[-5] in (0, 1) and message[-1] in (0, 1):
+            return message[:-6], message[-6:]
+        if len(message) >= 6 and message[-3] == 0x65 and message[-2] >= 0x80:
+            return message[:-3], message[-3:]
+        return message, b""
 
     def _extract_packet(self):
         """Extract a packet from the buffer based on the expected length."""
@@ -142,6 +207,13 @@ class TJCClient(Nextion):
     def event_message_handler(self, message):
         """Handle incoming event messages with error checking."""
         try:
+            if message[0] == 0x70:
+                text = message[3:].decode("utf-8", "replace")
+                self._schedule_event_message_handler(
+                    EventType.STRING_INPUT,
+                    TJCStringInputPayload(message[1], message[2], text),
+                )
+                return
             event_type = EventType(message[0])
             payload_map = {
                 EventType.TOUCH_COORDINATE: (">HHB", TJCTouchCoordinatePayload),

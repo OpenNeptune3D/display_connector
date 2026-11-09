@@ -13,6 +13,9 @@ WorkingDirectory=/home/mks/display_connector
 # can apply updated unit files without re-running the installer manually.
 ExecStartPre=+/usr/bin/install -m 0644 /home/mks/display_connector/display.service /etc/systemd/system/display.service
 ExecStartPre=+/bin/systemctl daemon-reload
+# Touch screen WiFi settings: let mks scan for and join networks through nmcli.
+# Kept after daemon-reload so it already runs on the restart that follows an update.
+ExecStartPre=-+/usr/bin/install -D -m 0644 /home/mks/display_connector/display-connector-wifi.rules /etc/polkit-1/rules.d/50-display-connector-wifi.rules
 ExecStartPre=/bin/sleep 10
 ExecStart=/home/mks/display_connector/venv/bin/python /home/mks/display_connector/display.py
 

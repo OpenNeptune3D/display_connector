@@ -2,7 +2,9 @@ import asyncio
 from unittest.mock import MagicMock
 
 import pytest
-from src.tjc import EventType, TJCClient, TJCNumericInputPayload, TJCProtocol, TJCTouchCoordinatePayload, TJCTouchDataPayload
+from unittest.mock import call
+
+from src.tjc import EventType, TJCClient, TJCNumericInputPayload, TJCProtocol, TJCStringInputPayload, TJCTouchCoordinatePayload, TJCTouchDataPayload
 
 
 @pytest.fixture(autouse=True)
@@ -62,6 +64,50 @@ async def test_data_received_variable():
     protocol.data_received(b"\x70\x10\x20\x30\x40\xFF\xFF\xFF")
     item = await protocol.queue.get()
     assert item == b"\x70\x10\x20\x30\x40"
+
+
+@pytest.mark.asyncio
+async def test_keyboard_text_has_no_terminator():
+    """keybdA's OK sends 0x70 <page> <component> <text> with no 0xFF 0xFF 0xFF."""
+    m = MagicMock()
+    protocol = TJCProtocol(m)
+    protocol.data_received(b"\x70\x84\x01ab")
+    protocol.data_received(b"1")
+    m.assert_not_called()
+    await asyncio.sleep(TJCProtocol.TEXT_INPUT_SETTLE + 0.1)
+    m.assert_called_once_with(b"\x70\x84\x01ab1")
+    assert protocol.buffer == b""
+
+
+@pytest.mark.asyncio
+async def test_keyboard_text_followed_by_touch_before_flush():
+    """A tap right after OK glues its bytes onto the text; both must come out."""
+    m = MagicMock()
+    protocol = TJCProtocol(m)
+    protocol.data_received(b"\x70\x84\x01ab1\x67\x00\x9a\x00\x6e\x01\xFF\xFF\xFF")
+    await asyncio.sleep(TJCProtocol.TEXT_INPUT_SETTLE + 0.1)
+    assert m.call_args_list == [
+        call(b"\x70\x84\x01ab1"),
+        call(b"\x67\x00\x9a\x00\x6e\x01"),
+    ]
+    assert protocol.buffer == b""
+
+
+@pytest.mark.asyncio
+async def test_get_text_reply_is_not_keyboard_text():
+    m = MagicMock()
+    protocol = TJCProtocol(m)
+    protocol.data_received(b"\x70Settings\xFF\xFF\xFF")
+    assert await protocol.queue.get() == b"\x70Settings"
+    m.assert_not_called()
+
+
+def test_event_string_input():
+    m = MagicMock()
+    client = TJCClient(None)
+    client._schedule_event_message_handler = m
+    client.event_message_handler(b"\x70\x84\x01my pass.1")
+    m.assert_called_once_with(EventType.STRING_INPUT, TJCStringInputPayload(page_id=132, component_id=1, string="my pass.1"))
 
 
 def test_event_touch_coordinate():

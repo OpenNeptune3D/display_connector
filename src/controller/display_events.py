@@ -1,7 +1,15 @@
 """Events coming from the touch screen (touches, inputs, page changes) for DisplayController."""
 
+import asyncio
+
 from src.tjc import EventType
-from src.response_actions import response_actions, input_actions, custom_touch_actions
+from src.response_actions import (
+    response_actions,
+    input_actions,
+    custom_touch_actions,
+    fallback_tab_touch_actions,
+    text_input_actions,
+)
 from src.mapping import (
     PAGE_MAIN,
     PAGE_PRINTING,
@@ -10,6 +18,12 @@ from src.mapping import (
 from src.controller.common import (
     logger,
 )
+
+
+# Seconds to wait for a component event from the same tap before using a fallback tab
+FALLBACK_TAB_DELAY = 0.15
+# Key-press beep for fallback tabs, since the firmware doesn't beep for them
+FALLBACK_TAB_BEEP_MS = 50
 
 
 class DisplayEventsMixin:
@@ -45,6 +59,14 @@ class DisplayEventsMixin:
                 return
         logger.info(f"Unhandled Input: {page} {component} {value}")
 
+    def handle_text_input(self, page, component, text):
+        action = text_input_actions.get(page, {}).get(component)
+        if action == "wifi_password":
+            self.handle_wifi_password(text)
+            return
+        # Don't log the text itself, it is usually a password
+        logger.info(f"Unhandled Text Input: {page} {component}")
+
     async def handle_custom_touch(self, x, y):
         current_page = await self._get_current_page()  
         if current_page in custom_touch_actions:
@@ -54,6 +76,16 @@ class DisplayEventsMixin:
                 if min_x < x and x < max_x and min_y < y and y < max_y:
                     self.execute_action(actions[key])
                     return
+        for (min_x, min_y, max_x, max_y), target in fallback_tab_touch_actions.get(current_page, {}).items():
+            if min_x < x < max_x and min_y < y < max_y:
+                # Give a component event from the same tap (older firmware) time to
+                # navigate first; each event runs in its own task, so this doesn't block it.
+                await asyncio.sleep(FALLBACK_TAB_DELAY)
+                if await self._get_current_page() != current_page:
+                    return
+                await self.display.write(f"beep {FALLBACK_TAB_BEEP_MS}")
+                await self._navigate_to_page(target)
+                return
 
     async def display_event_handler(self, type, data):
         if type == EventType.TOUCH:
@@ -65,6 +97,8 @@ class DisplayEventsMixin:
             self.handle_input(data.page_id, data.component_id, data.value)
         elif type == EventType.NUMERIC_INPUT:
             self.handle_input(data.page_id, data.component_id, data.value)
+        elif type == EventType.STRING_INPUT:
+            self.handle_text_input(data.page_id, data.component_id, data.string)
         elif type == EventType.RECONNECTED:
             logger.info("Reconnected to Display")
             # Re-enable touch coordinate reporting; the panel forgets this

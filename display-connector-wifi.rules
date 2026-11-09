@@ -1,0 +1,12 @@
+// Lets the display connector (display.service runs as mks) scan for, join and
+// switch WiFi from the touch screen. Installed to /etc/polkit-1/rules.d/ by
+// display.service and display-service-installer.sh.
+polkit.addRule(function(action, subject) {
+    if (subject.user == "mks" && (
+            action.id == "org.freedesktop.NetworkManager.wifi.scan" ||
+            action.id == "org.freedesktop.NetworkManager.network-control" ||
+            action.id == "org.freedesktop.NetworkManager.settings.modify.system" ||
+            action.id == "org.freedesktop.NetworkManager.enable-disable-wifi")) {
+        return polkit.Result.YES;
+    }
+});
