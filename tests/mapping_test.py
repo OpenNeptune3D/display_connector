@@ -34,6 +34,7 @@ def test_format_default_filename():
     format_filename = build_format_filename()
     assert format_filename("test.gcode") == "test"
     assert format_filename("test_pla_0.2mm_printer_1h.gcode") == "test_pla_0.2mm"
+    assert format_filename("EN4Pro_04_Model_TPU_0.2_32m16s.gcode") == "EN4Pro_04_Model_TPU"
 
 
 def test_format_printing_filename():
