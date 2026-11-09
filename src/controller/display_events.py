@@ -16,6 +16,10 @@ class DisplayEventsMixin:
     """Events coming from the touch screen (touches, inputs, page changes)."""
 
     def handle_response(self, page, component):
+        extra = self.display.extra_response_actions
+        if component in extra.get(page, {}):
+            self.execute_action(extra[page][component])
+            return
         if page in response_actions:
             if component in response_actions[page]:
                 self.execute_action(response_actions[page][component])
