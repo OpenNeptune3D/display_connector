@@ -15,6 +15,8 @@ PAGE_SETTINGS_TEMPERATURE = "settings_temperature"
 PAGE_SETTINGS_TEMPERATURE_SET = "settings_temperature_set"
 PAGE_SETTINGS_ABOUT = "settings_about"
 PAGE_SETTINGS_ADVANCED = "settings_advanced"
+PAGE_SETTINGS_WIFI = "settings_wifi"
+PAGE_SETTINGS_WIFI_PASSWORD = "settings_wifi_password"
 
 
 PAGE_CONFIRM_PRINT = "confirm_print"
@@ -62,8 +64,10 @@ def format_percent(value):
 
 
 # This attempts to strip the printer definition, the time estimate and the file extension from the filename
+DEFAULT_CLEAN_FILENAME_REGEX = r"(.*)_.*?_(?:[0-9]+h|[0-9]+m|[0-9]+s)+\.gcode"
+
 filename_regex_wrapper = {
-    "default": re.compile(r"(.*)_.*?_(?:[0-9]+h|[0-9]+m|[0-9]+s)+\.gcode"),
+    "default": re.compile(DEFAULT_CLEAN_FILENAME_REGEX),
     "printing": re.compile(r"(.*)_.*?_.*?_.*?_(?:[0-9]+h|[0-9]+m|[0-9]+s)+\.gcode"),
 }
 

@@ -1,15 +1,13 @@
 [Unit]
-Description=Apply minimal display priority tuning
+Description=Remove legacy display_connector affinity tuning (one-time migration)
 
-# Run after display is up so the script can tune display.service safely.
+# affinity.service is retired. Installed display.service units from earlier
+# releases still install and enable this unit from the repo on startup, so it
+# stays as a shim that removes itself and the legacy tuning, then never runs again.
 After=display.service
-
-# Re-run when display.service is restarted/stopped.
-PartOf=display.service
 
 [Service]
 Type=oneshot
-RemainAfterExit=yes
 ExecStart=/home/mks/display_connector/affinity-setup.sh
 
 [Install]
