@@ -33,6 +33,8 @@ from src.colors import (
 from src.wifi import get_wlan0_status
 from src.elegoo_display.screens import ElegooScreensMixin
 
+NEXTION_TYPE_TEXT = 116
+
 
 class ElegooDisplayCommunicator(ElegooScreensMixin, DisplayCommunicator):
     supported_firmware_versions = ["1.2.11", "1.2.12", "1.2.13", "1.2.14", "1.2.14.1", "1.2.16", "1.2.17", "1.2.18", "1.2.22"]
@@ -43,6 +45,8 @@ class ElegooDisplayCommunicator(ElegooScreensMixin, DisplayCommunicator):
 
         # Firmware version attribute initialized
         self._firmware_version = None
+        self._about_fields = None
+        self._about_ip_field = None
 
     # Cache WiFi status to avoid delays
         self._cached_wifi_status = None
@@ -54,6 +58,44 @@ class ElegooDisplayCommunicator(ElegooScreensMixin, DisplayCommunicator):
         if self._firmware_version is None:  # Check if the firmware version is cached
             self._firmware_version = await self.display.get("information.lversion.txt", self.timeout)
         return self._firmware_version
+
+    async def get_about_fields(self) -> dict:
+        # Locate the About page size/version fields from the TFT's own layout
+        # instead of the firmware version: some TFTs shifted them down one slot.
+        # machine and lversion are global, so this works from any page.
+        if self._about_fields is None:
+            page = self.mapper.map_page(PAGE_SETTINGS_ABOUT)
+            try:
+                machine_id = int(await self.display.get(f"{page}.machine.id", self.timeout))
+                lversion_id = int(await self.display.get(f"{page}.lversion.id", self.timeout))
+            except Exception as e:
+                self.logger.debug(f"Could not probe About page layout, using defaults: {e}")
+                return {"size": "b[9]", "version": "b[10]"}
+            # Size and firmware version sit between the machine name and UI version
+            if lversion_id - machine_id == 3:
+                self._about_fields = {"size": f"b[{machine_id + 1}]", "version": f"b[{machine_id + 2}]"}
+            else:
+                self._about_fields = {"size": "b[9]", "version": "b[10]"}
+            self.logger.debug(f"About page fields: {self._about_fields}")
+        return self._about_fields
+
+    async def get_about_ip_field(self) -> str:
+        # Must run while the About page is shown, since b[16] is page-local.
+        # Older TFTs use the text field b[16]; newer ones made b[16] a timer and
+        # moved the IP to t9.
+        if self._about_ip_field is None:
+            page = self.mapper.map_page(PAGE_SETTINGS_ABOUT)
+            for field in ("b[16]", "t9"):
+                try:
+                    if await self.display.get(f"{page}.{field}.type", self.timeout) == NEXTION_TYPE_TEXT:
+                        self._about_ip_field = field
+                        self.logger.debug(f"About page IP field: {field}")
+                        break
+                except Exception:
+                    pass
+            else:
+                return "b[16]"
+        return self._about_ip_field
 
     async def send_warning_message(self):
         try:
@@ -103,7 +145,9 @@ class ElegooDisplayCommunicator(ElegooScreensMixin, DisplayCommunicator):
         elif current_page == PAGE_SETTINGS_ABOUT:
             await self.write(
                 self.mapper.map_page(PAGE_SETTINGS_ABOUT)
-                + '.b[16].txt="'
+                + "."
+                + await self.get_about_ip_field()
+                + '.txt="'
                 + self.ips
                 + '"'
             )

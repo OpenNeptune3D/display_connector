@@ -121,16 +121,20 @@ class ElegooScreensMixin:
             )
 
     async def update_klipper_version_ui(self, software_version):
+        fields = await self.get_about_fields()
         await self.write(
             self.mapper.map_page(PAGE_SETTINGS_ABOUT)
-            + '.b[10].txt="'
+            + "."
+            + fields["version"]
+            + '.txt="'
             + software_version
             + '"'
         )
 
     async def update_machine_size_ui(self, max_x, max_y, max_z):
+        fields = await self.get_about_fields()
         await self.write(
-            f'{self.mapper.map_page(PAGE_SETTINGS_ABOUT)}.b[9].txt="{max_x}x{max_y}x{max_z}"'
+            f'{self.mapper.map_page(PAGE_SETTINGS_ABOUT)}.{fields["size"]}.txt="{max_x}x{max_y}x{max_z}"'
         )
 
     async def display_thumbnail(self, page_number, thumbnail):
