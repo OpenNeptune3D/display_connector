@@ -15,7 +15,7 @@ REQ_FILE="$PROJECT_DIR/requirements.txt"
 # --- System packages (lightweight) -------------------------------------------
 echo "[1/6] Updating APT and installing minimal prereqs..."
 sudo apt-get update
-sudo apt-get install -y libsystemd-dev setserial python3-systemd pkg-config
+sudo apt-get install -y setserial
 
 # --- Python / venv selection --------------------------------------------------
 # Prefer 3.13, then 3.12, then 3.11, else system default python3-venv.
@@ -64,7 +64,7 @@ if ! "$PIP_BIN" install --prefer-binary -r "$REQ_FILE"; then
   echo "-> Wheel-first install failed; enabling fallback to source builds."
   echo "-> Installing minimal build deps (one-time, small):"
 
-  # Generic build toolchain + headers commonly needed for Pillow/systemd-python
+  # Generic build toolchain + headers commonly needed for Pillow
   sudo apt-get install -y build-essential python3-dev pkg-config \
                           libjpeg-dev zlib1g-dev libfreetype-dev \
                           libopenjp2-7-dev libtiff-dev
@@ -73,11 +73,14 @@ if ! "$PIP_BIN" install --prefer-binary -r "$REQ_FILE"; then
   "$PIP_BIN" install --no-cache-dir -r "$REQ_FILE"
 fi
 
+# systemd-python was replaced by src/sd_notify.py; drop it from older venvs
+"$PIP_BIN" uninstall -y systemd-python >/dev/null 2>&1 || true
+
 # --- Done ---------------------------------------------------------------------
 echo "[6/6] Environment ready."
 echo "Python: $("$PY_BIN" -V)"
 echo "pip:    $("$PIP_BIN" --version)"
 echo "Selected packages (if installed):"
-"$PIP_BIN" list | grep -E '^(pyserial|pyserial-asyncio|aiohttp|pillow|numpy|systemd-python)\b' || true
+"$PIP_BIN" list | grep -E '^(pyserial|pyserial-asyncio|aiohttp|pillow|numpy)\b' || true
 
 echo "Setup completed."

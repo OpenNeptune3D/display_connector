@@ -8,8 +8,8 @@ import os
 import asyncio
 import traceback
 import signal
-import systemd.daemon
 
+from src import sd_notify
 from src.config import ConfigHandler
 from watchdog.observers import Observer
 from watchdog.events import PatternMatchingEventHandler
@@ -107,17 +107,14 @@ try:
     config_observer.start()
 
     # Notify systemd we're ready
-    systemd.daemon.notify('READY=1')
-    logger.info("Service ready, notified systemd")
+    if sd_notify.notify('READY=1'):
+        logger.info("Service ready, notified systemd")
 
     # Watchdog ping task
     async def watchdog_ping():
         while not _shutdown_requested:
-            try:
-                systemd.daemon.notify('WATCHDOG=1')
-                await asyncio.sleep(30)  # Ping every 30 seconds (WatchdogSec=60)
-            except Exception as e:
-                logger.error(f"Watchdog ping failed: {e}")
+            sd_notify.notify('WATCHDOG=1')
+            await asyncio.sleep(30)  # Ping every 30 seconds (WatchdogSec=60)
 
     # Start watchdog ping
     loop.create_task(watchdog_ping())
@@ -133,7 +130,7 @@ except Exception as e:
     logger.error(traceback.format_exc())
 finally:
     _shutdown_requested = True
-    systemd.daemon.notify('STOPPING=1')
+    sd_notify.notify('STOPPING=1')
     logger.info("Shutting down service...")
     
     config_observer.stop()

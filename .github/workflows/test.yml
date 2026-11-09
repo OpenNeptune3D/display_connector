@@ -21,8 +21,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python_version }}
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libsystemd-dev
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -42,8 +40,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python_version }}
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libsystemd-dev
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -68,8 +64,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python_version }}
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libsystemd-dev
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
