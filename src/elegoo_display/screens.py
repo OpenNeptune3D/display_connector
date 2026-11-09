@@ -10,6 +10,10 @@ from src.colors import (
     TEXT_SUCCESS,
 )
 
+# leveldata_36 components covered by the Z-probe UI: b[17]/b[18] temperatures,
+# b[22]-b[25] Auxiliary/Automatic buttons, b[2]-b[7] and b[27]-b[56] mesh values
+ZPROBE_HIDDEN_COMPONENTS = (17, 18, *range(2, 8), *range(22, 57))
+
 
 class ElegooScreensMixin:
     """Leveling, thumbnail, status and shutdown screens."""
@@ -71,6 +75,11 @@ class ElegooScreensMixin:
 
     async def draw_initial_zprobe_leveling(self, z_probe_step, z_probe_distance):
         await self.write(f'{self.mapper.map_page(PAGE_LEVELING_Z_OFFSET_ADJUST)}.b[19].txt="Z-Probe"')
+        # Hide the stock page's temperatures, Auxiliary/Automatic buttons and mesh grid
+        # so a touch can't redraw them over the fills below (#35)
+        for component in ZPROBE_HIDDEN_COMPONENTS:
+            await self.write(f"vis b[{component}],0")
+        # The button boxes are part of the page background image, so still paint over them
         await self.write("fill 0,250,320,320,10665")
         await self.write("fill 0,50,320,80,10665")
         await self.update_zprobe_leveling_ui(z_probe_step, z_probe_distance)
