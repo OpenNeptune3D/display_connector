@@ -1,6 +1,10 @@
 import struct
 import asyncio
+import logging
+import time
 from collections import namedtuple
+
+import serial
 from enum import IntEnum
 from nextion import Nextion
 from nextion.protocol.nextion import NextionProtocol
@@ -128,6 +132,8 @@ class TJCProtocol(NextionProtocol):
 
 class TJCClient(Nextion):
     is_reconnecting = False
+    # The nextion library only has a module-level logger
+    logger = logging.getLogger(__name__)
 
     def _make_protocol(self):
         """Create a TJCProtocol instance."""
@@ -177,9 +183,31 @@ class TJCClient(Nextion):
             # connect() will clear this when it succeeds; make sure we don't get stuck
             self.is_reconnecting = False
 
+    def _drain_serial_port(self):
+        """Clear serial state left behind by a previous session.
+
+        After an unclean restart, unread bytes in the host buffer and a half-received
+        command in the panel's parser make every baud probe read garbage instead of
+        "comok", and each failed probe adds more traffic for the next one to trip on.
+        """
+        # nextion 2.x calls it _baudrate, 3.x _baud_rate
+        baud = getattr(self, "_baud_rate", None) or getattr(self, "_baudrate", None) or 115200
+        try:
+            with serial.serial_for_url(self._url, baudrate=baud, timeout=0) as port:
+                port.reset_output_buffer()
+                port.reset_input_buffer()
+                # Terminate whatever command the panel was halfway through receiving
+                port.write(b"\xff\xff\xff")
+                port.flush()
+                time.sleep(0.1)  # let the panel's error reply arrive, then drop it
+                port.reset_input_buffer()
+        except (serial.SerialException, OSError, ValueError) as exc:
+            self.logger.debug("Could not drain %s before connecting: %r", self._url, exc)
+
     async def connect(self) -> None:
         """Connect to the device with a quick, safe re-init."""
         try:
+            await asyncio.get_running_loop().run_in_executor(None, self._drain_serial_port)
             await self._try_connect_on_different_baudrates()
             for method in ("reset_input_buffer", "reset_output_buffer", "flush"):
                 try:

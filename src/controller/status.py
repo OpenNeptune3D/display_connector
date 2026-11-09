@@ -288,7 +288,9 @@ class StatusMixin:
         # Update other heating values, sensors, etc.
         if f"filament_switch_sensor {self.filament_sensor_name}" in new_data:
             sensor_data = new_data[f"filament_switch_sensor {self.filament_sensor_name}"]
-            self.filament_sensor_state = int(sensor_data.get("enabled", 0)) == 1
+            # Moonraker reports "enabled": null when the sensor isn't configured
+            enabled = sensor_data.get("enabled")
+            self.filament_sensor_state = enabled is not None and int(enabled) == 1
 
         if "configfile" in new_data:
             self.handle_machine_config_change(new_data["configfile"])

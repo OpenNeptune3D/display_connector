@@ -1,5 +1,5 @@
 import logging
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.communicator import DisplayCommunicator
@@ -50,3 +50,25 @@ def test_encoding_is_passed_to_client_constructor():
     with patch("src.communicator.TJCClient") as client:
         DisplayCommunicator(logging, "N4", "/dev/not-opened", None)
     client.assert_called_once_with("/dev/not-opened", 115200, None, encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_update_data_skips_null_without_placeholder(communicator):
+    from src.mapping import MappingLeaf, format_temp
+
+    communicator.write = AsyncMock()
+    communicator.logger = MagicMock()
+    communicator.data_mapping = {
+        "output_pin Part_Light": {
+            "value": [
+                MappingLeaf(["led1"]),
+                MappingLeaf(["led1"], field_type="pic", formatter=lambda x: "77" if int(x) == 1 else "76"),
+            ]
+        },
+        "extruder": {"temperature": [MappingLeaf(["nozzletemp"], formatter=format_temp)]},
+    }
+    await communicator.update_data({"output_pin Part_Light": {"value": None}, "extruder": {"temperature": None}})
+
+    # Null is only written where the formatter renders a placeholder, and failures on it aren't logged
+    communicator.write.assert_awaited_once_with('nozzletemp.txt="N/A"')
+    communicator.logger.debug.assert_not_called()

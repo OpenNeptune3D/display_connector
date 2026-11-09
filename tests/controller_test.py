@@ -56,3 +56,21 @@ def test_openneptune_main_page_temp_and_light_tiles():
     stock.handle_response(1, 1)
     assert stock.actions == ["files_picker"]
     assert ElegooNeptune4DisplayCommunicator.extra_response_actions == {}
+
+
+def test_filament_sensor_enabled_null():
+    # Moonraker reports "enabled": null when the sensor isn't configured
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    controller = SimpleNamespace(
+        filament_sensor_name="fila",
+        filament_sensor_state=True,
+        _update_data_task=None,
+        _loop=MagicMock(),
+        _run_coalesced_update=MagicMock(),
+    )
+    for enabled, expected in ((None, False), (True, True), (False, False)):
+        new_data = {"filament_switch_sensor fila": {"enabled": enabled}}
+        DisplayController._update_misc_states(controller, new_data, {})
+        assert controller.filament_sensor_state is expected

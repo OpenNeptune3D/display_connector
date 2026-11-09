@@ -185,6 +185,11 @@ class DisplayCommunicator:
 
     async def _update_data_leaf(self, value, mapping_value):
         for mapping_leaf in mapping_value:
+            # Moonraker reports missing objects (no filament sensor, no light pin) as null.
+            # Without a formatter that renders a placeholder (format_temp shows "N/A"),
+            # there is nothing to write, so leave the field as it is.
+            if value is None and mapping_leaf.formatter is None:
+                continue
             try:
                 formatted = await self._format_value(mapping_leaf, value)
                 for mapped_key in mapping_leaf.fields:
@@ -195,8 +200,10 @@ class DisplayCommunicator:
                     )
                     await self.write(command)
             except Exception as e:
-                # Log but continue processing other mappings
-                self.logger.debug(f"Failed to update display leaf: {e}")
+                # Log but continue processing other mappings. Formatters like int(x) can't
+                # take null; that's expected for missing objects, so don't log it.
+                if value is not None:
+                    self.logger.debug(f"Failed to update display leaf: {e}")
 
     async def _format_value(self, mapping_leaf, value):
         if not mapping_leaf.required_fields:

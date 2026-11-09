@@ -94,3 +94,29 @@ def test_event_slider():
     client._schedule_event_message_handler = m
     client.event_message_handler(b"\x72\x03\x16\x10\x09")
     m.assert_called_once_with(EventType.NUMERIC_INPUT, TJCNumericInputPayload(page_id=3, component_id=22, value=2320))
+
+
+@pytest.mark.asyncio
+async def test_connect_drains_serial_port_before_probing():
+    from unittest.mock import AsyncMock, patch
+    from nextion.exceptions import ConnectionFailed
+
+    client = TJCClient("/dev/ttyS1", 115200)
+    calls = []
+    client._try_connect_on_different_baudrates = AsyncMock(
+        side_effect=lambda: calls.append("probe") or (_ for _ in ()).throw(ConnectionFailed("No baud rate suited"))
+    )
+    with patch("src.tjc.serial.serial_for_url") as serial_for_url:
+        port = serial_for_url.return_value.__enter__.return_value
+        port.reset_input_buffer.side_effect = lambda: calls.append("drain")
+        with pytest.raises(ConnectionFailed):
+            await client.connect()
+
+    serial_for_url.assert_called_once_with("/dev/ttyS1", baudrate=115200, timeout=0)
+    port.write.assert_called_once_with(b"\xff\xff\xff")
+    assert calls == ["drain", "drain", "probe"]
+
+
+def test_drain_serial_port_ignores_missing_port():
+    client = TJCClient("/dev/does-not-exist", 115200)
+    client._drain_serial_port()  # must not raise; connect() reports the real error
