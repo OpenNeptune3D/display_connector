@@ -8,6 +8,7 @@ from src.mapping import (
     PAGE_SETTINGS_WIFI_PASSWORD,
 )
 from src.wifi import (
+    clean_wifi_password,
     connect_wifi,
     get_wlan0_ip,
     saved_wifi_connections,
@@ -67,6 +68,13 @@ class WifiSettingsMixin:
         ssid = self.wifi_selected_ssid
         self.wifi_selected_ssid = None
         if ssid is None:
+            self._loop.create_task(self._go_back())
+            return
+        password = clean_wifi_password(password)
+        if password is None:
+            # Back to the list, which shows the status instead of the network name
+            logger.info(f"WiFi password for {ssid!r} has characters a WiFi password can't contain")
+            self.wifi_status = "Invalid char"
             self._loop.create_task(self._go_back())
             return
         self._run_wifi_task(self._wifi_connect(ssid, password, from_keyboard=True))

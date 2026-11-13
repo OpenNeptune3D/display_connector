@@ -81,6 +81,20 @@ def test_connect_failure_keeps_existing_profile():
     assert ["connection", "delete", "id", "Home"] not in calls
 
 
+def test_clean_wifi_password_maps_curly_quotes():
+    assert wifi.clean_wifi_password("a“b”c") == 'a"b"c'
+
+
+def test_clean_wifi_password_keeps_printable_ascii():
+    every_symbol = " !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
+    assert wifi.clean_wifi_password("Abc123" + every_symbol) == "Abc123" + every_symbol
+
+
+@pytest.mark.parametrize("password", ["pass€word", "pass、word", "pass…", "cafépass"])
+def test_clean_wifi_password_rejects_non_ascii(password):
+    assert wifi.clean_wifi_password(password) is None
+
+
 def test_wifi_permitted_needs_all_permissions():
     granted = "\n".join([
         "org.freedesktop.NetworkManager.network-control:yes",
@@ -136,6 +150,33 @@ async def test_secured_unknown_network_asks_for_password_then_connects():
     connect.assert_called_once_with("Office", "secret123")
     assert controller.history == [PAGE_SETTINGS_WIFI]
     assert controller.wifi_status == "Connected"
+
+
+@pytest.mark.asyncio
+async def test_curly_quotes_from_keyboard_connect_as_straight_quotes():
+    controller = FakeController(page=PAGE_SETTINGS_WIFI_PASSWORD)
+    controller.history = [PAGE_SETTINGS_WIFI, PAGE_SETTINGS_WIFI_PASSWORD]
+    controller.wifi_selected_ssid = "Office"
+    with patch("src.controller.wifi_settings.connect_wifi", return_value=(True, "")) as connect, \
+         patch("src.controller.wifi_settings.scan_networks", return_value=NETWORKS), \
+         patch("src.controller.wifi_settings.wifi_radio_enabled", return_value=True), \
+         patch("src.controller.wifi_settings.get_wlan0_ip", return_value=None):
+        controller.handle_wifi_password("say“hi”")
+        await controller._wifi_task
+    connect.assert_called_once_with("Office", 'say"hi"')
+
+
+@pytest.mark.asyncio
+async def test_impossible_password_is_not_sent_to_nmcli():
+    controller = FakeController(page=PAGE_SETTINGS_WIFI_PASSWORD)
+    controller.history = [PAGE_SETTINGS_WIFI, PAGE_SETTINGS_WIFI_PASSWORD]
+    controller.wifi_selected_ssid = "Office"
+    with patch("src.controller.wifi_settings.connect_wifi") as connect:
+        controller.handle_wifi_password("pass€word")
+        await asyncio.sleep(0)
+    connect.assert_not_called()
+    assert controller.wifi_status == "Invalid char"
+    assert controller.history == [PAGE_SETTINGS_WIFI]
 
 
 @pytest.mark.asyncio

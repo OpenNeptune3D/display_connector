@@ -179,6 +179,25 @@ def saved_wifi_connections():
     return names
 
 
+# The stock keyboard's symbol page (keybdA) has curly double quotes but no
+# straight one, so typing " on the touch screen sends U+201C / U+201D
+_KEYBOARD_LOOKALIKES = str.maketrans({"“": '"', "”": '"'})
+
+
+def clean_wifi_password(password):
+    """Turn touch screen keyboard text into a WiFi password, or None if it can't be one.
+
+    WPA passphrases are printable ASCII (IEEE 802.11i), so a curly quote can only
+    mean a straight one. Anything else outside ASCII 32-126 (the keyboard also
+    offers characters like the euro sign or an ellipsis) can never match, and
+    nmcli would only report it as a wrong password.
+    """
+    password = password.translate(_KEYBOARD_LOOKALIKES)
+    if all(" " <= char <= "~" for char in password):
+        return password
+    return None
+
+
 def connect_wifi(ssid, password=None):
     """Connect wlan0 to ssid, returning (ok, message).
 
