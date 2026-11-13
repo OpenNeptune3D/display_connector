@@ -9,6 +9,7 @@ from src.mapping import (
     PAGE_SETTINGS_WIFI_MENU,
     PAGE_SETTINGS_WIFI_CONFIRM,
     PAGE_SETTINGS_WIFI_MESSAGE,
+    PAGE_SETTINGS_WIFI_ERROR,
 )
 from src.wifi import (
     clean_wifi_password,
@@ -104,7 +105,7 @@ class WifiSettingsMixin:
         elif action in ("wifi_confirm_yes", "wifi_confirm_no"):
             self._run_wifi_task(self._wifi_answer(action == "wifi_confirm_yes"))
         elif action == "wifi_message_ok":
-            self._run_wifi_task(self._wifi_leave(PAGE_SETTINGS_WIFI_MESSAGE))
+            self._run_wifi_task(self._wifi_leave_message())
 
     def handle_wifi_password(self, password):
         ssid = self.wifi_selected_ssid
@@ -116,7 +117,7 @@ class WifiSettingsMixin:
         if password is None:
             logger.info(f"WiFi password for {ssid!r} has characters a WiFi password can't contain")
             self._run_wifi_task(self._wifi_show_message(
-                "The password has a character WiFi passwords can't have"
+                ssid, ["Password has a character", "WiFi passwords can't have"], error=True
             ))
             return
         self._run_wifi_task(self._wifi_connect(ssid, password))
@@ -128,12 +129,14 @@ class WifiSettingsMixin:
                 self.history.pop()
         await self._navigate_to_page(page)
 
-    async def _wifi_show_message(self, text):
-        self.display.stage_wifi_message(text)
-        await self._wifi_replace_page(PAGE_SETTINGS_WIFI_MESSAGE)
+    async def _wifi_show_message(self, title, lines, error=False):
+        self.display.stage_wifi_message(title, lines, error)
+        await self._wifi_replace_page(PAGE_SETTINGS_WIFI_ERROR if error else PAGE_SETTINGS_WIFI_MESSAGE)
 
-    async def _wifi_leave(self, page):
-        if await self._wifi_on_page(page):
+    async def _wifi_leave_message(self):
+        if await self._wifi_on_page(PAGE_SETTINGS_WIFI_MESSAGE) or await self._wifi_on_page(
+            PAGE_SETTINGS_WIFI_ERROR
+        ):
             await self._go_back()
 
     async def _wifi_open_menu(self, network):
@@ -153,7 +156,9 @@ class WifiSettingsMixin:
             enabled = not network.get("autoconnect", True)
             if await asyncio.to_thread(set_wifi_autoconnect, ssid, enabled):
                 network["autoconnect"] = enabled
-                await self.display.draw_wifi_menu(ssid, network["in_use"], enabled)
+                await self.display.draw_wifi_menu(
+                    ssid, network["in_use"], enabled, lambda: self._wifi_on_page(PAGE_SETTINGS_WIFI_MENU)
+                )
         elif action == "forget":
             self._wifi_question = ("forget", ssid)
             self.display.stage_wifi_confirm("Forget?", f"Forget {ssid}")
@@ -178,9 +183,11 @@ class WifiSettingsMixin:
             if await asyncio.to_thread(forget_wifi, ssid):
                 self.display.invalidate_wifi_status()
                 self.wifi_networks = await asyncio.to_thread(_load_networks, False)
-                await self._wifi_show_message(f"{ssid} forgotten")
+                await self._wifi_show_message(ssid, ["Network forgotten"])
             else:
-                await self._wifi_show_message(await self._wifi_failure_message(f"Could not forget {ssid}"))
+                await self._wifi_show_message(
+                    ssid, await self._wifi_failure_lines("Could not forget it"), error=True
+                )
 
     async def handle_wifi_keyboard_touch(self, x, y, pressed):
         """After a tap on the keyboard's mode key, relabel the symbol page if it is up.
@@ -243,7 +250,9 @@ class WifiSettingsMixin:
                 status = connected["ssid"]
             else:
                 status = "Not connected"
-        await self.display.draw_wifi_list(self.wifi_networks, self.wifi_page, status, ip)
+        await self.display.draw_wifi_list(
+            self.wifi_networks, self.wifi_page, status, ip, lambda: self._wifi_on_page(PAGE_SETTINGS_WIFI)
+        )
 
     async def _wifi_failure_status(self, default):
         """Tell the user to reboot when the polkit rule isn't in place yet.
@@ -255,10 +264,10 @@ class WifiSettingsMixin:
             return "Need reboot"
         return default
 
-    async def _wifi_failure_message(self, default):
+    async def _wifi_failure_lines(self, default):
         if not await asyncio.to_thread(wifi_permitted):
-            return "WiFi settings need a printer restart first"
-        return default
+            return ["Restart the printer", "to use WiFi settings"]
+        return [default]
 
     async def _wifi_scan(self):
         # Show what NetworkManager already knows straight away, then rescan
@@ -304,15 +313,15 @@ class WifiSettingsMixin:
         self.wifi_status = None
         self.wifi_networks = await asyncio.to_thread(_load_networks, False)
         if ok:
-            message = f"Connected to {ssid}"
+            lines = ["Connected"]
         elif "Secrets were required" in output or "psk" in output:
-            message = f"Wrong password for {ssid}"
+            lines = ["Wrong password"]
         else:
-            message = await self._wifi_failure_message(f"Could not connect to {ssid}")
+            lines = await self._wifi_failure_lines("Could not connect")
         if fallback:
-            message += f". Back on {fallback}"
+            lines.append(f"Reconnected to {fallback}")
         if await self._wifi_on_page(PAGE_OVERLAY_LOADING):
-            await self._wifi_show_message(message)
+            await self._wifi_show_message(ssid, lines, error=not ok)
 
     async def _wifi_toggle(self):
         enable = not await asyncio.to_thread(wifi_radio_enabled)

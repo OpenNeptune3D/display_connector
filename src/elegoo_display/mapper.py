@@ -21,6 +21,7 @@ from src.mapping import (
     PAGE_SETTINGS_WIFI_MENU,
     PAGE_SETTINGS_WIFI_CONFIRM,
     PAGE_SETTINGS_WIFI_MESSAGE,
+    PAGE_SETTINGS_WIFI_ERROR,
     PAGE_LEVELING,
     PAGE_LEVELING_SCREW_ADJUST,
     PAGE_LEVELING_Z_OFFSET_ADJUST,
@@ -66,12 +67,14 @@ class ElegooDisplayMapper(Mapper):
         PAGE_SETTINGS_WIFI: "wifi_list",
         PAGE_SETTINGS_WIFI_PASSWORD: "keybdA",
         # Stock pages with nothing of their own to do here, relabelled for WiFi:
-        # the "Print mode" list (3 rows), the "Leveling mode" list (2 rows) and
-        # the PID calibration "Detection completed" message (1 button). Their
-        # buttons only report touches, so the connector decides what they do.
+        # the "Print mode" list (3 rows), the "Leveling mode" list (2 rows), the
+        # PID calibration "Detection completed" message (1 button, a green tick)
+        # and the input shaper "detection failed" one (the same, failure icon).
+        # Their buttons only report touches, so the connector decides what they do.
         PAGE_SETTINGS_WIFI_MENU: "134",
         PAGE_SETTINGS_WIFI_CONFIRM: "136",
         PAGE_SETTINGS_WIFI_MESSAGE: "125",
+        PAGE_SETTINGS_WIFI_ERROR: "121",
         PAGE_LEVELING: "file2",
         PAGE_LEVELING_SCREW_ADJUST: "assist_level",
         PAGE_LEVELING_Z_OFFSET_ADJUST: "leveldata_36",

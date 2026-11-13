@@ -127,10 +127,12 @@ response_actions = {
     },
     # Stock pages relabelled for WiFi (component 0 is their back arrow): the
     # "Print mode" list as a saved network's menu, the "Leveling mode" list as a
-    # yes/no question and the PID "Detection completed" page as a message
+    # yes/no question and the PID "Detection completed" and input shaper
+    # "detection failed" pages as messages
     134: {1: "wifi_menu_connect", 2: "wifi_menu_autoconnect", 3: "wifi_menu_forget"},
     136: {1: "wifi_confirm_yes", 2: "wifi_confirm_no", 3: "wifi_confirm_no"},
     125: {1: "wifi_message_ok"},
+    121: {1: "wifi_message_ok"},
     # Confirm Print
     18: {0: "print_opened_file", 1: "go_back"},
     # Printing

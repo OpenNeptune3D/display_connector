@@ -19,6 +19,7 @@ from src.mapping import (
     PAGE_OVERLAY_LOADING,
     PAGE_SETTINGS_WIFI,
     PAGE_SETTINGS_WIFI_CONFIRM,
+    PAGE_SETTINGS_WIFI_ERROR,
     PAGE_SETTINGS_WIFI_MENU,
     PAGE_SETTINGS_WIFI_MESSAGE,
     PAGE_SETTINGS_WIFI_PASSWORD,
@@ -190,7 +191,7 @@ class FakeController(WifiSettingsMixin):
             await self._wifi_task
 
     def message(self):
-        return self.display.stage_wifi_message.call_args.args[0]
+        return self.display.stage_wifi_message.call_args.args
 
 
 NETWORKS = [
@@ -246,7 +247,7 @@ async def test_secured_unknown_network_asks_for_password_then_connects():
         await controller._wifi_task
         mocks.connect_wifi.assert_called_once_with("Office", "secret123")
         assert controller.history == [PAGE_SETTINGS_WIFI, PAGE_SETTINGS_WIFI_MESSAGE]
-        assert controller.message() == "Connected to Office"
+        assert controller.message() == ("Office", ["Connected"], False)
 
         await controller.run("wifi_message_ok")
     assert controller.history == [PAGE_SETTINGS_WIFI]
@@ -263,7 +264,7 @@ async def test_saved_network_opens_its_menu():
         await controller.run("wifi_menu_connect")
     mocks.connect_wifi.assert_called_once_with("Office", None)
     assert controller.history == [PAGE_SETTINGS_WIFI, PAGE_SETTINGS_WIFI_MESSAGE]
-    assert controller.message() == "Connected to Office"
+    assert controller.message() == ("Office", ["Connected"], False)
 
 
 @pytest.mark.asyncio
@@ -284,7 +285,7 @@ async def test_menu_toggles_autoconnect():
         await controller.run("wifi_select_1")
         await controller.run("wifi_menu_autoconnect")
         mocks.set_wifi_autoconnect.assert_called_once_with("Office", True)
-        controller.display.draw_wifi_menu.assert_awaited_with("Office", False, True)
+        assert controller.display.draw_wifi_menu.await_args.args[:3] == ("Office", False, True)
         await controller.run("wifi_menu_autoconnect")
         mocks.set_wifi_autoconnect.assert_called_with("Office", False)
     assert controller.history == [PAGE_SETTINGS_WIFI, PAGE_SETTINGS_WIFI_MENU]
@@ -303,7 +304,7 @@ async def test_forget_asks_first():
         await controller.run("wifi_confirm_yes")
     mocks.forget_wifi.assert_called_once_with("Office")
     assert controller.history == [PAGE_SETTINGS_WIFI, PAGE_SETTINGS_WIFI_MESSAGE]
-    assert controller.message() == "Office forgotten"
+    assert controller.message() == ("Office", ["Network forgotten"], False)
 
 
 @pytest.mark.asyncio
@@ -346,17 +347,17 @@ async def test_dialog_actions_only_work_on_their_own_page(action):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("result, message", [
-    ((False, "Error: Secrets were required, but not provided", None), "Wrong password for Office"),
-    ((False, "Error: 802-11-wireless-security.psk: property is invalid", None), "Wrong password for Office"),
-    ((False, "Error: Secrets were required, but not provided", "Home"), "Wrong password for Office. Back on Home"),
-    ((False, "Error: Connection activation failed: timeout", "Home"), "Could not connect to Office. Back on Home"),
+    ((False, "Error: Secrets were required, but not provided", None), ["Wrong password"]),
+    ((False, "Error: 802-11-wireless-security.psk: property is invalid", None), ["Wrong password"]),
+    ((False, "Error: Secrets were required, but not provided", "Home"), ["Wrong password", "Reconnected to Home"]),
+    ((False, "Error: Connection activation failed: timeout", "Home"), ["Could not connect", "Reconnected to Home"]),
 ])
 async def test_failed_connect_says_why(result, message):
     controller = keyboard_open_on("Office")
     with nm(connect=result):
         controller.handle_wifi_password("secret123")
         await controller._wifi_task
-    assert controller.message() == message
+    assert controller.message() == ("Office", message, True)
 
 
 @pytest.mark.asyncio
@@ -365,7 +366,7 @@ async def test_connect_without_permission_asks_for_a_restart():
     with nm(connect=(False, "Error: Not authorized", None), permitted=False):
         controller.handle_wifi_password("secret123")
         await controller._wifi_task
-    assert controller.message() == "WiFi settings need a printer restart first"
+    assert controller.message() == ("Office", ["Restart the printer", "to use WiFi settings"], True)
 
 
 @pytest.mark.parametrize("component", [1, 2, 3, 8])
@@ -410,7 +411,7 @@ async def test_password_goes_from_keyboard_straight_to_the_loading_overlay():
         controller.handle_wifi_password("secret123")
         await controller._wifi_task
     assert seen == [[PAGE_SETTINGS_WIFI, PAGE_OVERLAY_LOADING]]
-    assert controller.history == [PAGE_SETTINGS_WIFI, PAGE_SETTINGS_WIFI_MESSAGE]
+    assert controller.history == [PAGE_SETTINGS_WIFI, PAGE_SETTINGS_WIFI_ERROR]
 
 
 @pytest.mark.asyncio
@@ -420,8 +421,8 @@ async def test_impossible_password_is_not_sent_to_nmcli():
         controller.handle_wifi_password("pass€word")
         await controller._wifi_task
     mocks.connect_wifi.assert_not_called()
-    assert controller.message() == "The password has a character WiFi passwords can't have"
-    assert controller.history == [PAGE_SETTINGS_WIFI, PAGE_SETTINGS_WIFI_MESSAGE]
+    assert controller.message() == ("Office", ["Password has a character", "WiFi passwords can't have"], True)
+    assert controller.history == [PAGE_SETTINGS_WIFI, PAGE_SETTINGS_WIFI_ERROR]
 
 
 MODE_KEY = (0, 440, 60, 480)
@@ -518,7 +519,7 @@ class FakeKeyboardPanel(ElegooWifiScreensMixin):
         self.writes.append(command)
 
     async def _execute_command(self, command, timeout=None):
-        self.writes.append(f"{command} (acked)")
+        self.writes.append(command)
 
     async def get_firmware_version(self):
         return self.firmware
@@ -553,7 +554,7 @@ async def test_symbol_page_gets_the_missing_ascii_symbols():
     panel = FakeKeyboardPanel()
     await panel.show_wifi_keyboard_symbols()
     assert panel.writes[0] == "bkcmd=0"
-    assert panel.writes[-1] == "bkcmd=3 (acked)"
+    assert panel.writes[-1] == "bkcmd=3"
     labels = [re.fullmatch(r'keybdA\.b\[\d+\]\.txt="(.*)"', w)[1] for w in panel.writes[1:-1]]
     assert sorted(label for label in labels if label) == sorted(['[', ']', '`', '\\"', "'", '{', '}'])
     assert len(labels) == len(wifi_screens._KEYBOARD_SYMBOL_KEYS)
@@ -585,7 +586,7 @@ async def test_paging_stays_in_range():
 @pytest.mark.asyncio
 async def test_list_status_shows_the_connected_network():
     controller = await list_controller()
-    controller.display.draw_wifi_list.assert_awaited_with(controller.wifi_networks, 0, "Home", "10.0.0.2")
+    assert controller.display.draw_wifi_list.await_args.args[:4] == (controller.wifi_networks, 0, "Home", "10.0.0.2")
 
 
 @pytest.mark.asyncio
@@ -596,11 +597,11 @@ async def test_list_draws_lock_signal_and_saved_colours():
         dict(NETWORKS[1], saved=True),  # saved
         dict(NETWORKS[2], signal=20, saved=False),  # open, weak
     ]
-    await panel.draw_wifi_list(networks, 0, "Home", "10.0.0.2")
+    await panel.draw_wifi_list(networks, 0, "Home", "10.0.0.2", AsyncMock(return_value=True))
     writes = panel.writes
-    assert f"wifi_list.b[4].pco={TEXT_SUCCESS}" in writes
-    assert f"wifi_list.b[7].pco={TEXT_HIGHLIGHT}" in writes
-    assert f"wifi_list.b[10].pco={TEXT_NORMAL}" in writes
+    assert f"b[4].pco={TEXT_SUCCESS}" in writes
+    assert f"b[7].pco={TEXT_HIGHLIGHT}" in writes
+    assert f"b[10].pco={TEXT_NORMAL}" in writes
     assert ["b[32].picc=341", "b[33].picc=341", "b[34].picc=340"] == [
         w for w in writes if re.match(r"b\[3[2-4]\]\.picc", w)
     ]
@@ -611,12 +612,32 @@ async def test_list_draws_lock_signal_and_saved_colours():
 
 
 @pytest.mark.asyncio
+async def test_list_is_not_drawn_onto_the_page_a_back_tap_went_to():
+    panel = FakeKeyboardPanel()
+    await panel.draw_wifi_list(NETWORKS, 0, "Home", "10.0.0.2", AsyncMock(return_value=False))
+    assert panel.writes == []
+
+
+@pytest.mark.asyncio
+async def test_list_is_drawn_as_one_block():
+    panel = FakeKeyboardPanel()
+    seen = []
+
+    async def still_on_page():
+        seen.append(panel._serial_lock.locked())
+        return True
+
+    await panel.draw_wifi_list(NETWORKS, 0, "Home", "10.0.0.2", still_on_page)
+    assert seen == [True]  # checked with the serial line held for the whole block
+
+
+@pytest.mark.asyncio
 async def test_pages_get_their_texts_as_they_open():
     panel = FakeKeyboardPanel()
-    await panel.draw_wifi_header("Home", "10.0.0.2")
+    await panel.draw_wifi_list([], 0, "Home", "10.0.0.2", AsyncMock(return_value=True))
     panel.stage_wifi_menu("Office", False, True)
     panel.stage_wifi_confirm("Forget?", "Forget Office")
-    panel.stage_wifi_message("Connected to Office")
+    panel.stage_wifi_message("Office", ["Wrong password", "Reconnected to Home"], error=True)
     panel.stage_wifi_password("Office")
     assert panel.page_entry_commands("wifi_list") == ['b[27].txt="Home"', 'b[28].txt="IP:10.0.0.2"']
     assert panel.page_entry_commands("134") == [
@@ -625,9 +646,10 @@ async def test_pages_get_their_texts_as_they_open():
     assert panel.page_entry_commands("136") == [
         'b[2].txt="Forget?"', 'b[4].txt="Forget Office"', 'b[7].txt="Cancel"',
     ]
-    assert panel.page_entry_commands("125") == [
-        'b[1].txt="WLAN"', 'b[3].txt="Connected to Office"', 'b[4].txt="OK"',
+    assert panel.page_entry_commands("121") == [
+        'b[1].txt="Office"', 'b[3].txt="Wrong password\\rReconnected to Home"', 'b[4].txt="OK"',
     ]
+    assert panel.page_entry_commands("125") == []  # the success page wasn't staged
     assert panel.page_entry_commands("keybdA") == ['b[49].txt="Office"', 'b[35].txt=""', 'b[34].txt=""']
     assert panel.page_entry_commands("main") == []
 

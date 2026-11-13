@@ -9,6 +9,7 @@ from src.mapping import (
     PAGE_SETTINGS_WIFI_MENU,
     PAGE_SETTINGS_WIFI_CONFIRM,
     PAGE_SETTINGS_WIFI_MESSAGE,
+    PAGE_SETTINGS_WIFI_ERROR,
 )
 from src.colors import (
     TEXT_HIGHLIGHT,
@@ -37,10 +38,12 @@ _MENU_ROWS = (4, 7, 9)
 # Yes/no question (stock "Leveling mode" list): title and two row texts
 _CONFIRM_TITLE = 2
 _CONFIRM_ROWS = (4, 7)
-# Message (stock PID "Detection completed" page): title, text and the button
+# Message (stock PID "Detection completed" and input shaper "detection failed"
+# pages): title, text and the button. A line holds about 29 characters.
 _MESSAGE_TITLE = 1
 _MESSAGE_TEXT = 3
 _MESSAGE_BUTTON = 4
+_MESSAGE_LINE_CHARS = 29
 
 # keybdA component ids: the input shows the typed text, which is kept in the
 # _KEYBOARD_TEXT variable; OK sends that variable
@@ -125,11 +128,25 @@ class ElegooWifiScreensMixin:
             _text(_MENU_ROWS[2], "Forget network"),
         ])
 
-    async def draw_wifi_menu(self, ssid, connected, autoconnect):
+    async def _write_while_on(self, commands, still_on_page):
+        """Send commands as one block, if still_on_page() says the page is still up.
+
+        These pages share component ids with others, and `vis` can't name its
+        page, so a back tap must not land in the middle: holding the serial lock
+        makes its page switch wait, and the check skips the block if it came first.
+        """
+        async with self._serial_lock:
+            if not await still_on_page():
+                return False
+            for command in commands:
+                await self._execute_command(command)
+        return True
+
+    async def draw_wifi_menu(self, ssid, connected, autoconnect, still_on_page):
         """Redraw the saved network menu while it is shown."""
         self.stage_wifi_menu(ssid, connected, autoconnect)
-        for command in self.page_entry_commands(self.mapper.map_page(PAGE_SETTINGS_WIFI_MENU)):
-            await self.write(command)
+        commands = self.page_entry_commands(self.mapper.map_page(PAGE_SETTINGS_WIFI_MENU))
+        await self._write_while_on(commands, still_on_page)
 
     def stage_wifi_confirm(self, title, yes, no="Cancel"):
         self._set_page_entry(PAGE_SETTINGS_WIFI_CONFIRM, [
@@ -138,11 +155,16 @@ class ElegooWifiScreensMixin:
             _text(_CONFIRM_ROWS[1], no, 16),
         ])
 
-    def stage_wifi_message(self, text, title="WLAN", button="OK"):
-        self._set_page_entry(PAGE_SETTINGS_WIFI_MESSAGE, [
-            _text(_MESSAGE_TITLE, title),
-            _text(_MESSAGE_TEXT, text, 60),
-            _text(_MESSAGE_BUTTON, button),
+    def stage_wifi_message(self, title, lines, error=False):
+        """A result: title (the network) and up to two short lines, with OK.
+
+        Errors go on the page with the failure icon, the rest on the green tick.
+        """
+        text = "\\r".join(_quote(_shorten(line, _MESSAGE_LINE_CHARS)) for line in lines)
+        self._set_page_entry(PAGE_SETTINGS_WIFI_ERROR if error else PAGE_SETTINGS_WIFI_MESSAGE, [
+            _text(_MESSAGE_TITLE, title, 20),
+            f'b[{_MESSAGE_TEXT}].txt="{text}"',
+            _text(_MESSAGE_BUTTON, "OK"),
         ])
 
     async def update_settings_page(self):
@@ -150,48 +172,47 @@ class ElegooWifiScreensMixin:
         if self.mapper.map_page(PAGE_SETTINGS) == "set_4_max":
             await self.write(f'b[{_SETTINGS_FACTORY_ROW_TEXT}].txt="Temperature Settings"')
 
-    async def draw_wifi_list(self, networks, page, status, ip):
+    async def draw_wifi_list(self, networks, page, status, ip, still_on_page):
         """Fill the 8 rows of wifi_list with one page of networks.
 
-        Must only be called while wifi_list is the current page: the row buttons
-        are local components, so `vis` and their attributes only work there.
+        still_on_page() must say whether wifi_list is still up: the row buttons
+        are local components, so `vis` and their attributes only work there, and
+        on another page the same ids are that page's components.
         """
-        prefix = self.mapper.map_page(PAGE_SETTINGS_WIFI)
         # Status line first: until it is written the page shows its stock "Label"
-        await self.draw_wifi_header(status, ip)
+        commands = self._wifi_header_commands(status, ip)
         shown = networks[page * WIFI_ROWS_PER_PAGE:(page + 1) * WIFI_ROWS_PER_PAGE]
         for row in range(WIFI_ROWS_PER_PAGE):
-            ids = (
+            button, text, signal, lock = (
                 _ROW_BUTTON + 3 * row,
                 _ROW_TEXT + 3 * row,
                 _ROW_SIGNAL + 3 * row,
                 _ROW_LOCK + row,
             )
             if row >= len(shown):
-                for component in ids:
-                    await self.write(f"vis b[{component}],0")
+                commands += [f"vis b[{component}],0" for component in (button, text, signal, lock)]
                 continue
             network = shown[row]
-            text_id = ids[1]
-            await self.write(f"vis b[{ids[0]}],1")
-            await self.write(f"vis b[{text_id}],1")
-            await self.write(
-                f'{prefix}.b[{text_id}].txt="{_quote(_shorten(network["ssid"], _SSID_MAX_CHARS))}"'
-            )
             if network["in_use"]:
                 color = TEXT_SUCCESS
             elif network.get("saved"):
                 color = TEXT_HIGHLIGHT
             else:
                 color = TEXT_NORMAL
-            await self.write(f"{prefix}.b[{text_id}].pco={color}")
             bars = categorize_signal_strength(network["signal"])
-            await self.write(f"b[{ids[2]}].picc={_ICON_SIGNAL_BASE + bars if bars else _ICON_NONE}")
-            await self.write(f"vis b[{ids[2]}],1")
-            await self.write(f"b[{ids[3]}].picc={_ICON_LOCK if network['secured'] else _ICON_NONE}")
-            await self.write(f"vis b[{ids[3]}],1")
+            commands += [
+                f"vis b[{button}],1",
+                f"vis b[{text}],1",
+                _text(text, network["ssid"], _SSID_MAX_CHARS),
+                f"b[{text}].pco={color}",
+                f"b[{signal}].picc={_ICON_SIGNAL_BASE + bars if bars else _ICON_NONE}",
+                f"vis b[{signal}],1",
+                f"b[{lock}].picc={_ICON_LOCK if network['secured'] else _ICON_NONE}",
+                f"vis b[{lock}],1",
+            ]
+        await self._write_while_on(commands, still_on_page)
 
-    async def draw_wifi_header(self, status, ip):
+    def _wifi_header_commands(self, status, ip):
         """The status and IP texts above the wifi_list rows.
 
         Also kept as page entry commands, so coming back to the list shows the
@@ -202,8 +223,7 @@ class ElegooWifiScreensMixin:
             f'b[{_IP_TEXT}].txt="{"IP:" + ip if ip else ""}"',
         ]
         self._set_page_entry(PAGE_SETTINGS_WIFI, commands)
-        for command in commands:
-            await self.write(command)
+        return list(commands)
 
     def stage_wifi_password(self, ssid):
         """Keyboard title, and nothing typed yet, for the next time it is shown."""
