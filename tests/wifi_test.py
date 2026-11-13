@@ -119,6 +119,7 @@ class FakeController(WifiSettingsMixin):
         self.history = [page]
         self.display = MagicMock()
         self.display.draw_wifi_list = AsyncMock()
+        self.display.draw_wifi_header = AsyncMock()
         self.display.draw_wifi_password = AsyncMock()
         self._init_wifi_settings()
 
@@ -182,6 +183,28 @@ async def test_curly_quotes_from_keyboard_connect_as_straight_quotes():
         controller.handle_wifi_password("say“hi”")
         await controller._wifi_task
     connect.assert_called_once_with("Office", 'say"hi"')
+
+
+@pytest.mark.asyncio
+async def test_password_goes_from_keyboard_straight_to_the_loading_overlay():
+    controller = FakeController(page=PAGE_SETTINGS_WIFI_PASSWORD)
+    controller.history = [PAGE_SETTINGS_WIFI, PAGE_SETTINGS_WIFI_PASSWORD]
+    controller.wifi_selected_ssid = "Office"
+    seen = []
+
+    def connect(ssid, password):
+        seen.append(list(controller.history))
+        return False, "Secrets were required"
+
+    with patch("src.controller.wifi_settings.connect_wifi", side_effect=connect), \
+         patch("src.controller.wifi_settings.scan_networks", return_value=NETWORKS), \
+         patch("src.controller.wifi_settings.wifi_radio_enabled", return_value=True), \
+         patch("src.controller.wifi_settings.get_wlan0_ip", return_value=None):
+        controller.handle_wifi_password("secret123")
+        await controller._wifi_task
+    assert seen == [[PAGE_SETTINGS_WIFI, PAGE_OVERLAY_LOADING]]
+    assert controller.history == [PAGE_SETTINGS_WIFI]
+    assert controller.wifi_status == "Wrong password"
 
 
 @pytest.mark.asyncio
@@ -359,6 +382,32 @@ async def test_paging_stays_in_range():
         controller.handle_wifi_action("wifi_page_next")
         assert controller.wifi_page == 1
         await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_status_line_is_covered_before_the_slow_nmcli_calls():
+    controller = FakeController()
+    controller.wifi_networks = list(NETWORKS)
+    order = []
+    controller.display.draw_wifi_header = AsyncMock(side_effect=lambda *a: order.append(("header", a)))
+
+    def radio():
+        order.append("nmcli")
+        return True
+
+    with patch("src.controller.wifi_settings.wifi_radio_enabled", side_effect=radio), \
+         patch("src.controller.wifi_settings.get_wlan0_ip", return_value="10.0.0.2"):
+        await controller._draw_wifi_list()  # first visit: nothing known yet, blank it
+        controller.wifi_status = "Wrong password"
+        await controller._draw_wifi_list()
+        controller.wifi_status = None
+        await controller._draw_wifi_list()  # back from elsewhere: last known status
+    assert order == [
+        ("header", ("", None)), "nmcli",
+        ("header", ("Wrong password", "10.0.0.2")), "nmcli",
+        ("header", ("Wrong password", "10.0.0.2")), "nmcli",
+    ]
+    controller.display.draw_wifi_list.assert_awaited_with(NETWORKS, 0, "Home", "10.0.0.2")
 
 
 @pytest.mark.asyncio

@@ -41,6 +41,7 @@ class WifiSettingsMixin:
         self.wifi_status = None  # message replacing the connection status, if any
         self.wifi_selected_ssid = None
         self._wifi_task = None
+        self._wifi_header = ("", None)  # status and IP last drawn on the list
         self.wifi_keyboard_mode_key = None  # its bounds; None leaves the keyboard stock
         self._wifi_mode_key_pressed = False
 
@@ -140,6 +141,10 @@ class WifiSettingsMixin:
     async def _draw_wifi_list(self):
         if not await self._wifi_on_page(PAGE_SETTINGS_WIFI):
             return
+        # The page comes back with its stock "Label" placeholder in the status
+        # line; cover it before the nmcli calls below, which take a moment
+        last_status, last_ip = self._wifi_header
+        await self.display.draw_wifi_header(self.wifi_status or last_status, last_ip)
         radio_on = await asyncio.to_thread(wifi_radio_enabled)
         ip = await asyncio.to_thread(get_wlan0_ip) if radio_on else None
         status = self.wifi_status
@@ -151,6 +156,7 @@ class WifiSettingsMixin:
                 status = connected["ssid"]
             else:
                 status = "Not connected"
+        self._wifi_header = (status, ip)
         await self.display.draw_wifi_list(self.wifi_networks, self.wifi_page, status, ip)
 
     async def _wifi_failure_status(self, default):
@@ -195,7 +201,12 @@ class WifiSettingsMixin:
     async def _wifi_connect(self, ssid, password, from_keyboard=False):
         logger.info(f"Connecting to WiFi network {ssid!r}")
         if from_keyboard:
-            await self._go_back()
+            # Straight from the keyboard to the loading overlay, so going back
+            # lands on the list. Showing the list in between only flashed its
+            # stock "Label" placeholder before the overlay replaced it.
+            async with self._history_lock:
+                if self.history and self.history[-1] == PAGE_SETTINGS_WIFI_PASSWORD:
+                    self.history.pop()
         await self._navigate_to_page(PAGE_OVERLAY_LOADING)
         ok, output = await asyncio.to_thread(connect_wifi, ssid, password)
         self.display.invalidate_wifi_status()

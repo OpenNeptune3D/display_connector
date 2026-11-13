@@ -85,6 +85,8 @@ class ElegooWifiScreensMixin:
         are local components, so `vis` and their attributes only work there.
         """
         prefix = self.mapper.map_page(PAGE_SETTINGS_WIFI)
+        # Status line first: until it is written the page shows its stock "Label"
+        await self.draw_wifi_header(status, ip)
         shown = networks[page * WIFI_ROWS_PER_PAGE:(page + 1) * WIFI_ROWS_PER_PAGE]
         for row in range(WIFI_ROWS_PER_PAGE):
             ids = (
@@ -111,6 +113,9 @@ class ElegooWifiScreensMixin:
             await self.write(f"vis b[{ids[2]}],0")
             await self.write(f"vis b[{ids[3]}],0")
 
+    async def draw_wifi_header(self, status, ip):
+        """The status and IP texts above the wifi_list rows."""
+        prefix = self.mapper.map_page(PAGE_SETTINGS_WIFI)
         await self.write(f'{prefix}.b[{_STATUS_TEXT}].txt="{_quote(_shorten(status, 12))}"')
         await self.write(f'{prefix}.b[{_IP_TEXT}].txt="{"IP:" + ip if ip else ""}"')
 
