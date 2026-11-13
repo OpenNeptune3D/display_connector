@@ -271,6 +271,13 @@ class WifiSettingsMixin:
         return [default]
 
     async def _wifi_scan(self):
+        if not await asyncio.to_thread(wifi_radio_enabled):
+            # Nothing to scan with; the list says "WiFi off"
+            self.wifi_networks = []
+            self.wifi_page = 0
+            self.wifi_status = None
+            await self._draw_wifi_list()
+            return
         # Show what NetworkManager already knows straight away, then rescan
         self.wifi_networks = await asyncio.to_thread(_load_networks, False)
         if not await asyncio.to_thread(wifi_permitted):

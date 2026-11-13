@@ -719,6 +719,17 @@ async def test_list_is_not_drawn_on_another_page():
 
 
 @pytest.mark.asyncio
+async def test_no_scan_with_wifi_off():
+    controller = FakeController()
+    with nm() as mocks:
+        mocks.wifi_radio_enabled.return_value = False
+        await controller._wifi_scan()
+    mocks.scan_networks.assert_not_called()
+    assert controller.wifi_status is None
+    assert controller.display.draw_wifi_list.await_args.args[:4] == ([], 0, "WiFi off", None)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("permitted, status", [(False, "Need reboot"), (True, "Scan failed")])
 async def test_failed_scan_says_why(permitted, status):
     controller = FakeController()
