@@ -17,6 +17,10 @@ PAGE_SETTINGS_ABOUT = "settings_about"
 PAGE_SETTINGS_ADVANCED = "settings_advanced"
 PAGE_SETTINGS_WIFI = "settings_wifi"
 PAGE_SETTINGS_WIFI_PASSWORD = "settings_wifi_password"
+PAGE_SETTINGS_WIFI_MENU = "settings_wifi_menu"  # a saved network: connect, autoconnect, forget
+PAGE_SETTINGS_WIFI_CONFIRM = "settings_wifi_confirm"  # yes or no question
+PAGE_SETTINGS_WIFI_MESSAGE = "settings_wifi_message"  # result with an OK button
+PAGE_SETTINGS_WIFI_ERROR = "settings_wifi_error"  # the same for a failure
 
 
 PAGE_CONFIRM_PRINT = "confirm_print"

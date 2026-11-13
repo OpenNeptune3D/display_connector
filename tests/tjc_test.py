@@ -94,6 +94,33 @@ async def test_keyboard_text_followed_by_touch_before_flush():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("reply", [b"\x01", b"\x1a"])
+async def test_keyboard_text_followed_by_command_reply_before_flush(reply):
+    """A write acknowledged while the text arrives glues its reply onto the text.
+
+    Seen on a Neptune 4 Pro: a status update's 0x01 ended up in the password and
+    the write timed out, which made the connector reconnect to the display.
+    """
+    m = MagicMock()
+    protocol = TJCProtocol(m)
+    protocol.data_received(b"\x70\x84\x03ab1" + reply + b"\xFF\xFF\xFF")
+    await asyncio.sleep(TJCProtocol.TEXT_INPUT_SETTLE + 0.1)
+    m.assert_called_once_with(b"\x70\x84\x03ab1")
+    assert await protocol.queue.get() == reply
+    assert protocol.buffer == b""
+
+
+@pytest.mark.asyncio
+async def test_empty_keyboard_text_keeps_its_header():
+    m = MagicMock()
+    protocol = TJCProtocol(m)
+    protocol.data_received(b"\x70\x84\x03\x01\xFF\xFF\xFF")
+    await asyncio.sleep(TJCProtocol.TEXT_INPUT_SETTLE + 0.1)
+    m.assert_called_once_with(b"\x70\x84\x03")
+    assert await protocol.queue.get() == b"\x01"
+
+
+@pytest.mark.asyncio
 async def test_get_text_reply_is_not_keyboard_text():
     m = MagicMock()
     protocol = TJCProtocol(m)

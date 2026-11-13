@@ -110,9 +110,12 @@ class TJCProtocol(NextionProtocol):
             return
         message, eol, rest = self.buffer.partition(self.EOL)
         if eol:
-            # Another event arrived before the timer fired; its bytes are glued to
-            # the end of the text, up to its terminator. Put them back in the buffer.
+            # Another event or a command reply arrived before the timer fired; its
+            # bytes are glued to the end of the text, up to its terminator. Put them
+            # back in the buffer.
             message, trailing = self._split_trailing_event(message)
+            if not trailing:
+                message, trailing = self._split_trailing_reply(message)
             if trailing:
                 rest = trailing + self.EOL + rest
         self.buffer = rest
@@ -130,6 +133,18 @@ class TJCProtocol(NextionProtocol):
             return message[:-6], message[-6:]
         if len(message) >= 6 and message[-3] == 0x65 and message[-2] >= 0x80:
             return message[:-3], message[-3:]
+        return message, b""
+
+    @staticmethod
+    def _split_trailing_reply(message):
+        """Split a one-byte command reply (0x01 success, 0x1A invalid variable, ...) off keyboard text.
+
+        A write the connector sent while the text was arriving (a status update,
+        say) is acknowledged right after it. Typed text has no control bytes, so a
+        last byte below 0x20 after the 3-byte header is that reply.
+        """
+        if len(message) > 3 and message[-1] < 0x20:
+            return message[:-1], message[-1:]
         return message, b""
 
     def _extract_packet(self):
