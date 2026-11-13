@@ -92,6 +92,7 @@ class DisplayEventsMixin:
         if type == EventType.TOUCH:
             self.handle_response(data.page_id, data.component_id)
         elif type == EventType.TOUCH_COORDINATE:
+            await self.handle_wifi_keyboard_touch(data.x, data.y, pressed=data.touch_event == 1)
             if data.touch_event == 0:
                 await self.handle_custom_touch(data.x, data.y)
         elif type == EventType.SLIDER_INPUT:

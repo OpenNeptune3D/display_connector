@@ -23,6 +23,15 @@ from src.controller.common import (
 )
 
 
+# Time for the panel to put its own labels up after switching to the symbol page
+KEYBOARD_LABEL_SETTLE = 0.1
+
+
+def _inside(bounds, x, y):
+    x0, y0, x1, y1 = bounds
+    return x0 <= x < x1 and y0 <= y < y1
+
+
 class WifiSettingsMixin:
     """WiFi network list, password entry and the WiFi on/off toggle."""
 
@@ -32,6 +41,8 @@ class WifiSettingsMixin:
         self.wifi_status = None  # message replacing the connection status, if any
         self.wifi_selected_ssid = None
         self._wifi_task = None
+        self.wifi_keyboard_mode_key = None  # its bounds; None leaves the keyboard stock
+        self._wifi_mode_key_pressed = False
 
     def _wifi_busy(self):
         return self._wifi_task is not None and not self._wifi_task.done()
@@ -78,6 +89,45 @@ class WifiSettingsMixin:
             self._loop.create_task(self._go_back())
             return
         self._run_wifi_task(self._wifi_connect(ssid, password, from_keyboard=True))
+
+    async def handle_wifi_keyboard_touch(self, x, y, pressed):
+        """After a tap on the keyboard's mode key, relabel the symbol page if it is up.
+
+        Only the mode key is followed, and the panel is only asked which page is up
+        after it: the typed text has no terminator, so a query reply that crossed
+        it on the serial line would end up in the password. Nobody presses OK
+        within a tenth of a second of switching pages.
+        """
+        key = self.wifi_keyboard_mode_key
+        if key is None or not await self._wifi_on_page(PAGE_SETTINGS_WIFI_PASSWORD):
+            return
+        if pressed:
+            # A tap that starts on the key and slides off still switches pages
+            self._wifi_mode_key_pressed = _inside(key, x, y)
+            return
+        if not (self._wifi_mode_key_pressed or _inside(key, x, y)):
+            return
+        self._wifi_mode_key_pressed = False
+        # The panel puts its stock labels back as it switches; replace them after
+        await asyncio.sleep(KEYBOARD_LABEL_SETTLE)
+        try:
+            if await self.display.wifi_keyboard_on_symbols():
+                await self.display.show_wifi_keyboard_symbols()
+        except Exception as e:
+            logger.debug(f"Could not relabel the WiFi keyboard symbols: {e}")
+
+    async def _open_wifi_keyboard(self, ssid):
+        await self._navigate_to_page(PAGE_SETTINGS_WIFI_PASSWORD)
+        await self.display.draw_wifi_password(ssid)
+        self._wifi_mode_key_pressed = False
+        self.wifi_keyboard_mode_key = None
+        mode_key = getattr(self.display, "wifi_keyboard_mode_key", None)
+        if mode_key is None:
+            return
+        try:
+            self.wifi_keyboard_mode_key = await mode_key()
+        except Exception as e:
+            logger.debug(f"WiFi keyboard keeps its stock symbols: {e}")
 
     async def show_wifi_settings(self):
         """Page entry (also when coming back from the keyboard or loading overlay)."""
@@ -138,8 +188,7 @@ class WifiSettingsMixin:
             return
         if network["secured"] and ssid not in await asyncio.to_thread(saved_wifi_connections):
             self.wifi_selected_ssid = ssid
-            await self._navigate_to_page(PAGE_SETTINGS_WIFI_PASSWORD)
-            await self.display.draw_wifi_password(ssid)
+            await self._open_wifi_keyboard(ssid)
             return
         await self._wifi_connect(ssid, None)
 

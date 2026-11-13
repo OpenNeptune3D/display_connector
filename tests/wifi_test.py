@@ -1,4 +1,5 @@
 import asyncio
+import re
 import subprocess
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -7,6 +8,9 @@ import pytest
 from src import wifi
 from src.controller.display_events import DisplayEventsMixin
 from src.controller.wifi_settings import WifiSettingsMixin
+from src.elegoo_display import ElegooDisplayMapper
+from src.elegoo_display import wifi_screens
+from src.elegoo_display.wifi_screens import ElegooWifiScreensMixin
 from src.mapping import (
     PAGE_OVERLAY_LOADING,
     PAGE_SETTINGS_WIFI,
@@ -191,6 +195,140 @@ async def test_impossible_password_is_not_sent_to_nmcli():
     connect.assert_not_called()
     assert controller.wifi_status == "Invalid char"
     assert controller.history == [PAGE_SETTINGS_WIFI]
+
+
+MODE_KEY = (0, 440, 60, 480)
+MODE_TAP = (30, 460)
+LETTER_TAP = (150, 400)
+
+
+def keyboard_controller(mode_key=MODE_KEY, on_symbols=True):
+    controller = FakeController(page=PAGE_SETTINGS_WIFI_PASSWORD)
+    controller.wifi_keyboard_mode_key = mode_key
+    controller.display.wifi_keyboard_on_symbols = AsyncMock(return_value=on_symbols)
+    controller.display.show_wifi_keyboard_symbols = AsyncMock()
+    return controller
+
+
+async def tap(controller, press, release=None):
+    await controller.handle_wifi_keyboard_touch(*press, pressed=True)
+    await controller.handle_wifi_keyboard_touch(*(release or press), pressed=False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("on_symbols", [True, False])
+async def test_mode_key_tap_relabels_only_when_the_panel_shows_symbols(on_symbols):
+    controller = keyboard_controller(on_symbols=on_symbols)
+    with patch("src.controller.wifi_settings.KEYBOARD_LABEL_SETTLE", 0):
+        await tap(controller, MODE_TAP)
+    controller.display.wifi_keyboard_on_symbols.assert_awaited_once()
+    assert controller.display.show_wifi_keyboard_symbols.await_count == int(on_symbols)
+
+
+@pytest.mark.asyncio
+async def test_mode_key_tap_that_slides_off_still_counts():
+    controller = keyboard_controller()
+    with patch("src.controller.wifi_settings.KEYBOARD_LABEL_SETTLE", 0):
+        await tap(controller, MODE_TAP, release=LETTER_TAP)
+    controller.display.show_wifi_keyboard_symbols.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_other_keys_never_query_the_panel():
+    controller = keyboard_controller()
+    with patch("src.controller.wifi_settings.KEYBOARD_LABEL_SETTLE", 0):
+        await tap(controller, LETTER_TAP)
+        await tap(controller, MODE_TAP)
+        await tap(controller, LETTER_TAP)  # e.g. OK, whose text must not meet a query
+    assert controller.display.wifi_keyboard_on_symbols.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_stock_keyboard_and_other_pages_are_left_alone():
+    controller = keyboard_controller(mode_key=None)
+    await tap(controller, MODE_TAP)
+    controller.display.wifi_keyboard_on_symbols.assert_not_awaited()
+    controller = keyboard_controller()
+    controller.history = [PAGE_SETTINGS_WIFI]
+    await tap(controller, MODE_TAP)
+    controller.display.wifi_keyboard_on_symbols.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_relabel_failure_does_not_escape():
+    controller = keyboard_controller()
+    controller.display.wifi_keyboard_on_symbols = AsyncMock(side_effect=TimeoutError)
+    with patch("src.controller.wifi_settings.KEYBOARD_LABEL_SETTLE", 0):
+        await tap(controller, MODE_TAP)
+
+
+@pytest.mark.asyncio
+async def test_opening_the_keyboard_reads_its_mode_key():
+    controller = FakeController()
+    controller.wifi_networks = list(NETWORKS)
+    controller.display.wifi_keyboard_mode_key = AsyncMock(return_value=MODE_KEY)
+    with patch("src.controller.wifi_settings.saved_wifi_connections", return_value=set()):
+        controller.handle_wifi_action("wifi_select_1")
+        await controller._wifi_task
+    assert controller.wifi_keyboard_mode_key == MODE_KEY
+
+
+class FakeKeyboardPanel(ElegooWifiScreensMixin):
+    """keybdA with a firmware version, mode key geometry and label; writes are recorded."""
+
+    def __init__(self, firmware="1.2.16", mode_label="!?#"):
+        self.firmware = firmware
+        self.mode_label = mode_label
+        self.mapper = ElegooDisplayMapper()
+        self.timeout = 1
+        self.writes = []
+        self.display = MagicMock()
+        self.display.get = AsyncMock(side_effect=self._get)
+        self._serial_lock = asyncio.Lock()
+
+    def _write_without_response(self, command):
+        self.writes.append(command)
+
+    async def _execute_command(self, command, timeout=None):
+        self.writes.append(f"{command} (acked)")
+
+    async def get_firmware_version(self):
+        return self.firmware
+
+    async def _get(self, attribute, timeout):
+        assert attribute.startswith("keybdA.b[30].")
+        if attribute.endswith(".txt"):
+            return self.mode_label
+        return {"x": 0, "y": 440, "w": 60, "h": 40}[attribute[-1]]
+
+
+@pytest.mark.asyncio
+async def test_mode_key_comes_from_the_panel_geometry():
+    assert await FakeKeyboardPanel().wifi_keyboard_mode_key() == MODE_KEY
+
+
+@pytest.mark.asyncio
+async def test_unknown_screen_firmware_keeps_the_stock_symbols():
+    panel = FakeKeyboardPanel(firmware="1.2.11")
+    assert await panel.wifi_keyboard_mode_key() is None
+    panel.display.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("label, on_symbols", [("ABC", True), ("!?#", False)])
+async def test_symbol_page_is_told_by_the_mode_key(label, on_symbols):
+    assert await FakeKeyboardPanel(mode_label=label).wifi_keyboard_on_symbols() is on_symbols
+
+
+@pytest.mark.asyncio
+async def test_symbol_page_gets_the_missing_ascii_symbols():
+    panel = FakeKeyboardPanel()
+    await panel.show_wifi_keyboard_symbols()
+    assert panel.writes[0] == "bkcmd=0"
+    assert panel.writes[-1] == "bkcmd=3 (acked)"
+    labels = [re.fullmatch(r'keybdA\.b\[\d+\]\.txt="(.*)"', w)[1] for w in panel.writes[1:-1]]
+    assert sorted(label for label in labels if label) == sorted(['[', ']', '`', '\\"', "'", '{', '}'])
+    assert len(labels) == len(wifi_screens._KEYBOARD_SYMBOL_KEYS)
 
 
 @pytest.mark.asyncio

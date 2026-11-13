@@ -1,5 +1,7 @@
 """WiFi settings screens (stock wifi_list and keybdA pages) for ElegooDisplayCommunicator."""
 
+import asyncio
+
 from src.mapping import (
     PAGE_SETTINGS,
     PAGE_SETTINGS_WIFI,
@@ -23,6 +25,33 @@ _SSID_MAX_CHARS = 18
 _KEYBOARD_TITLE = 49
 _KEYBOARD_INPUT = 35
 
+_KEYBOARD_BURST_SETTLE = 0.05
+
+# "!?#" on the letters page, "ABC" on the symbol page
+_KEYBOARD_MODE_KEY = 30
+_KEYBOARD_MODE_ON_SYMBOLS = "ABC"
+
+# keybdA symbol page keys whose characters can't be in a WiFi password (WPA
+# passphrases are printable ASCII), with the ASCII symbols the page is missing
+# put in their place; the rest are blanked. A key types its current label, but
+# the panel puts its own labels back every time it switches to the symbol page.
+# Read from a Neptune 4 Pro screen; other firmware keeps the stock symbols.
+_KEYBOARD_SYMBOL_FIRMWARE = {"1.2.16"}
+_KEYBOARD_SYMBOL_KEYS = {
+    # id: (stock label, wifi label)
+    8: ("、", ""),     # ideographic comma
+    20: ("《", "["),   # double angle brackets
+    21: ("》", "]"),
+    26: ("￥", "`"),   # fullwidth yen
+    27: ("“", '"'),   # curly double quotes
+    28: ("”", "'"),
+    41: ("×", ""),    # multiplication sign
+    45: ("£", "{"),   # pound
+    46: ("€", "}"),   # euro
+    47: ("…", ""),    # ellipsis
+    48: ("¢", ""),    # cent
+}
+
 # set_4_max: text of the "Factory Settings" row, reused for Temperature Settings
 _SETTINGS_FACTORY_ROW_TEXT = 19
 
@@ -30,6 +59,11 @@ _SETTINGS_FACTORY_ROW_TEXT = 19
 def _quote(text):
     """Make text safe to put inside a TJC "..." string."""
     return text.replace("\\", "\\\\").replace('"', "'")
+
+
+def _escape(text):
+    """Escape text for a TJC "..." string, keeping double quotes."""
+    return text.replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _shorten(text, limit):
@@ -84,3 +118,41 @@ class ElegooWifiScreensMixin:
         prefix = self.mapper.map_page(PAGE_SETTINGS_WIFI_PASSWORD)
         await self.write(f'{prefix}.b[{_KEYBOARD_TITLE}].txt="{_quote(_shorten(ssid, 20))}"')
         await self.write(f'{prefix}.b[{_KEYBOARD_INPUT}].txt=""')
+
+    async def wifi_keyboard_mode_key(self):
+        """Where keybdA's letters/symbols key is, as (x0, y0, x1, y1).
+
+        None on screen firmware whose symbol layout isn't known. Call right after
+        opening the keyboard, before anything is typed: the typed text has no
+        terminator, so a query reply must not cross it on the serial line.
+        """
+        if await self.get_firmware_version() not in _KEYBOARD_SYMBOL_FIRMWARE:
+            return None
+        prefix = self.mapper.map_page(PAGE_SETTINGS_WIFI_PASSWORD)
+        x, y, w, h = [
+            int(await self.display.get(f"{prefix}.b[{_KEYBOARD_MODE_KEY}].{attribute}", self.timeout))
+            for attribute in ("x", "y", "w", "h")
+        ]
+        return x, y, x + w, y + h
+
+    async def wifi_keyboard_on_symbols(self):
+        """Is keybdA showing its symbol page? The mode key then offers the letters."""
+        prefix = self.mapper.map_page(PAGE_SETTINGS_WIFI_PASSWORD)
+        mode = await self.display.get(f"{prefix}.b[{_KEYBOARD_MODE_KEY}].txt", self.timeout)
+        return mode == _KEYBOARD_MODE_ON_SYMBOLS
+
+    async def show_wifi_keyboard_symbols(self):
+        """Swap the symbol page's non-ASCII keys for the ASCII symbols it lacks."""
+        prefix = self.mapper.map_page(PAGE_SETTINGS_WIFI_PASSWORD)
+        labels = [f'{prefix}.b[{key}].txt="{_escape(label)}"' for key, (_, label) in _KEYBOARD_SYMBOL_KEYS.items()]
+        # One burst instead of a write per key: status updates keep the serial line
+        # busy, and waiting for every label's ack behind them took 1-2 s. bkcmd=0
+        # stops the acks, and the acknowledged bkcmd=3 at the end means the panel
+        # has done the rest. (Holding the redraw with ref_stop/ref_star made the
+        # whole keyboard blink, and the burst is quick enough without it.)
+        async with self._serial_lock:
+            for command in ("bkcmd=0", *labels):
+                self._write_without_response(command)
+            # Let a reply to bkcmd=0 itself arrive, so the next command flushes it
+            await asyncio.sleep(_KEYBOARD_BURST_SETTLE)
+            await self._execute_command("bkcmd=3")
