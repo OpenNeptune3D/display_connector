@@ -251,7 +251,8 @@ class WifiSettingsMixin:
             else:
                 status = "Not connected"
         await self.display.draw_wifi_list(
-            self.wifi_networks, self.wifi_page, status, ip, lambda: self._wifi_on_page(PAGE_SETTINGS_WIFI)
+            self.wifi_networks, self.wifi_page, status, ip,
+            lambda: self._wifi_on_page(PAGE_SETTINGS_WIFI), radio_on=radio_on,
         )
 
     async def _wifi_failure_status(self, default):

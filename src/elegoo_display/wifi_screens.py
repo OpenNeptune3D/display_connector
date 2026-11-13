@@ -31,6 +31,11 @@ _SSID_MAX_CHARS = 18
 _ICON_NONE = 340
 _ICON_LOCK = 341
 _ICON_SIGNAL_BASE = 340  # + 1-4 bars
+# The WiFi switch in the header, also a crop: 348 has it on, the page
+# background (339) off
+_RADIO_SWITCH = 41
+_SWITCH_ON = 348
+_SWITCH_OFF = 339
 
 # Saved network menu (stock "Print mode" list): title and three row texts
 _MENU_TITLE = 2
@@ -172,7 +177,7 @@ class ElegooWifiScreensMixin:
         if self.mapper.map_page(PAGE_SETTINGS) == "set_4_max":
             await self.write(f'b[{_SETTINGS_FACTORY_ROW_TEXT}].txt="Temperature Settings"')
 
-    async def draw_wifi_list(self, networks, page, status, ip, still_on_page):
+    async def draw_wifi_list(self, networks, page, status, ip, still_on_page, radio_on=True):
         """Fill the 8 rows of wifi_list with one page of networks.
 
         still_on_page() must say whether wifi_list is still up: the row buttons
@@ -180,7 +185,7 @@ class ElegooWifiScreensMixin:
         on another page the same ids are that page's components.
         """
         # Status line first: until it is written the page shows its stock "Label"
-        commands = self._wifi_header_commands(status, ip)
+        commands = self._wifi_header_commands(status, ip, radio_on)
         shown = networks[page * WIFI_ROWS_PER_PAGE:(page + 1) * WIFI_ROWS_PER_PAGE]
         for row in range(WIFI_ROWS_PER_PAGE):
             button, text, signal, lock = (
@@ -212,13 +217,14 @@ class ElegooWifiScreensMixin:
             ]
         await self._write_while_on(commands, still_on_page)
 
-    def _wifi_header_commands(self, status, ip):
-        """The status and IP texts above the wifi_list rows.
+    def _wifi_header_commands(self, status, ip, radio_on=True):
+        """The WiFi switch and the status and IP texts above the wifi_list rows.
 
         Also kept as page entry commands, so coming back to the list shows the
         last status straight away instead of the stock "Label".
         """
         commands = [
+            f"b[{_RADIO_SWITCH}].picc={_SWITCH_ON if radio_on else _SWITCH_OFF}",
             _text(_STATUS_TEXT, status, 12),
             f'b[{_IP_TEXT}].txt="{"IP:" + ip if ip else ""}"',
         ]

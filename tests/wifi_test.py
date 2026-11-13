@@ -633,6 +633,14 @@ async def test_list_draws_lock_signal_and_saved_colours():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("radio_on, picc", [(True, 348), (False, 339)])
+async def test_wifi_switch_shows_the_radio_state(radio_on, picc):
+    panel = FakeKeyboardPanel()
+    await panel.draw_wifi_list([], 0, "WiFi off", None, AsyncMock(return_value=True), radio_on=radio_on)
+    assert panel.writes[0] == f"b[41].picc={picc}"
+
+
+@pytest.mark.asyncio
 async def test_list_is_not_drawn_onto_the_page_a_back_tap_went_to():
     panel = FakeKeyboardPanel()
     await panel.draw_wifi_list(NETWORKS, 0, "Home", "10.0.0.2", AsyncMock(return_value=False))
@@ -660,7 +668,9 @@ async def test_pages_get_their_texts_as_they_open():
     panel.stage_wifi_confirm("Forget?", "Forget Office")
     panel.stage_wifi_message("Office", ["Wrong password", "Reconnected to Home"], error=True)
     panel.stage_wifi_password("Office")
-    assert panel.page_entry_commands("wifi_list") == ['b[27].txt="Home"', 'b[28].txt="IP:10.0.0.2"']
+    assert panel.page_entry_commands("wifi_list") == [
+        "b[41].picc=348", 'b[27].txt="Home"', 'b[28].txt="IP:10.0.0.2"',
+    ]
     assert panel.page_entry_commands("134") == [
         'b[2].txt="Office"', 'b[4].txt="Connect"', 'b[7].txt="Auto-connect: On"', 'b[9].txt="Forget network"',
     ]
