@@ -60,11 +60,12 @@ class DisplayEventsMixin:
         logger.info(f"Unhandled Input: {page} {component} {value}")
 
     def handle_text_input(self, page, component, text):
-        action = text_input_actions.get(page, {}).get(component)
+        action = text_input_actions.get(page)
+        # Don't log the text itself, it is usually a password
+        logger.debug(f"Text Input: {page} {component}")
         if action == "wifi_password":
             self.handle_wifi_password(text)
             return
-        # Don't log the text itself, it is usually a password
         logger.info(f"Unhandled Text Input: {page} {component}")
 
     async def handle_custom_touch(self, x, y):

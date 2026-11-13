@@ -257,10 +257,12 @@ response_actions = {
     },
 }
 
-# Text typed on a keyboard page, sent when its OK button is pressed
+# Text typed on a keyboard page, sent when its OK button is pressed. Keyed by
+# page only: the second byte isn't reliably the input's id (a Neptune 4 Pro sent
+# 0x03 after picking a network, 0x01 when keybdA was opened directly).
 text_input_actions = {
     # keybdA, the WiFi password keyboard
-    132: {1: "wifi_password"},
+    132: "wifi_password",
 }
 
 input_actions = {

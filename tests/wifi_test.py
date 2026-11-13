@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src import wifi
+from src.controller.display_events import DisplayEventsMixin
 from src.controller.wifi_settings import WifiSettingsMixin
 from src.mapping import (
     PAGE_OVERLAY_LOADING,
@@ -150,6 +151,19 @@ async def test_secured_unknown_network_asks_for_password_then_connects():
     connect.assert_called_once_with("Office", "secret123")
     assert controller.history == [PAGE_SETTINGS_WIFI]
     assert controller.wifi_status == "Connected"
+
+
+@pytest.mark.parametrize("component", [1, 2, 3, 8])
+def test_keyboard_text_is_the_password_whatever_its_second_byte(component):
+    controller = MagicMock()
+    DisplayEventsMixin.handle_text_input(controller, 132, component, "secret123")
+    controller.handle_wifi_password.assert_called_once_with("secret123")
+
+
+def test_text_from_other_pages_is_ignored():
+    controller = MagicMock()
+    DisplayEventsMixin.handle_text_input(controller, 77, 1, "secret123")
+    controller.handle_wifi_password.assert_not_called()
 
 
 @pytest.mark.asyncio
