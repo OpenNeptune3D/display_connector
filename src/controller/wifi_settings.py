@@ -177,7 +177,10 @@ class WifiSettingsMixin:
             await self._go_back()
             return
         kind, ssid = question
-        if kind == "join":
+        if kind == "radio_off":
+            await self._go_back()  # to the list, which then shows WiFi off
+            await self._wifi_set_radio(False)
+        elif kind == "join":
             await self._wifi_connect(ssid, None)
         elif kind == "forget":
             if await asyncio.to_thread(forget_wifi, ssid):
@@ -332,7 +335,15 @@ class WifiSettingsMixin:
             await self._wifi_show_message(ssid, lines, error=not ok)
 
     async def _wifi_toggle(self):
-        enable = not await asyncio.to_thread(wifi_radio_enabled)
+        if await asyncio.to_thread(wifi_radio_enabled):
+            # Off takes the printer offline, and only the screen can undo it
+            self._wifi_question = ("radio_off", None)
+            self.display.stage_wifi_confirm("WiFi off?", "Turn WiFi off", "Keep it on")
+            await self._navigate_to_page(PAGE_SETTINGS_WIFI_CONFIRM)
+            return
+        await self._wifi_set_radio(True)
+
+    async def _wifi_set_radio(self, enable):
         if not await asyncio.to_thread(set_wifi_radio, enable):
             self.wifi_status = await self._wifi_failure_status("Not allowed")
             await self._draw_wifi_list()

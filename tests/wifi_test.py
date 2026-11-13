@@ -719,6 +719,40 @@ async def test_list_is_not_drawn_on_another_page():
 
 
 @pytest.mark.asyncio
+async def test_turning_wifi_off_asks_first():
+    controller = await list_controller()
+    with nm() as mocks:
+        mocks.set_wifi_radio = MagicMock(return_value=True)
+        with patch("src.controller.wifi_settings.set_wifi_radio", mocks.set_wifi_radio):
+            await controller.run("wifi_toggle")
+            assert controller.history == [PAGE_SETTINGS_WIFI, PAGE_SETTINGS_WIFI_CONFIRM]
+            controller.display.stage_wifi_confirm.assert_called_once_with("WiFi off?", "Turn WiFi off", "Keep it on")
+            mocks.set_wifi_radio.assert_not_called()
+
+            await controller.run("wifi_confirm_no")
+            assert controller.history == [PAGE_SETTINGS_WIFI]
+            mocks.set_wifi_radio.assert_not_called()
+
+            await controller.run("wifi_toggle")
+            await controller.run("wifi_confirm_yes")
+    mocks.set_wifi_radio.assert_called_once_with(False)
+    assert controller.history == [PAGE_SETTINGS_WIFI]
+    assert controller.wifi_networks == []
+
+
+@pytest.mark.asyncio
+async def test_turning_wifi_on_does_not_ask():
+    controller = FakeController()
+    with nm() as mocks, patch("src.controller.wifi_settings.set_wifi_radio", return_value=True) as radio, \
+            patch("src.controller.wifi_settings.asyncio.sleep", AsyncMock()):
+        mocks.wifi_radio_enabled.side_effect = [False, True, True, True, True]
+        await controller.run("wifi_toggle")
+    radio.assert_called_once_with(True)
+    controller.display.stage_wifi_confirm.assert_not_called()
+    assert controller.history == [PAGE_SETTINGS_WIFI]
+
+
+@pytest.mark.asyncio
 async def test_no_scan_with_wifi_off():
     controller = FakeController()
     with nm() as mocks:
