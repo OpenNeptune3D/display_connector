@@ -376,6 +376,27 @@ def test_keyboard_text_is_the_password_whatever_its_second_byte(component):
     controller.handle_wifi_password.assert_called_once_with("secret123")
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("x, y, action", [(140, 285, "wifi_message_ok"), (20, 20, "wifi_message_ok"), (140, 150, None)])
+async def test_failure_page_ok_goes_by_position(x, y, action):
+    """The stock button on the failure page sends no touch event."""
+    controller = MagicMock()
+    controller._get_current_page = AsyncMock(return_value=PAGE_SETTINGS_WIFI_ERROR)
+    await DisplayEventsMixin.handle_custom_touch(controller, x, y)
+    if action:
+        controller.execute_action.assert_called_once_with(action)
+    else:
+        controller.execute_action.assert_not_called()
+
+
+def test_back_event_on_the_failure_page_is_left_to_the_position_rule():
+    controller = MagicMock()
+    controller.history = [PAGE_SETTINGS_WIFI, PAGE_SETTINGS_WIFI_ERROR]
+    controller.display.extra_response_actions = {}
+    DisplayEventsMixin.handle_response(controller, 121, 0)
+    controller._go_back.assert_not_called()  # else back would run twice
+
+
 def test_text_from_other_pages_is_ignored():
     controller = MagicMock()
     DisplayEventsMixin.handle_text_input(controller, 77, 1, "secret123")
