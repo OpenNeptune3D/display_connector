@@ -166,17 +166,51 @@ def scan_networks(rescan=True):
     )
 
 
-def saved_wifi_connections():
-    """Names of saved WiFi connection profiles."""
-    ok, output = _nmcli(["-t", "-f", "NAME,TYPE", "connection", "show"])
+def saved_wifi_profiles():
+    """Saved WiFi connection profiles, as {name: autoconnect}."""
+    ok, output = _nmcli(["-t", "-f", "NAME,TYPE,AUTOCONNECT", "connection", "show"])
     if not ok:
-        return set()
-    names = set()
+        return {}
+    profiles = {}
     for line in output.splitlines():
         fields = _split_terse(line)
-        if len(fields) >= 2 and fields[1] == "802-11-wireless":
-            names.add(fields[0])
-    return names
+        if len(fields) >= 3 and fields[1] == "802-11-wireless":
+            profiles[fields[0]] = fields[2] == "yes"
+    return profiles
+
+
+def saved_wifi_connections():
+    """Names of saved WiFi connection profiles."""
+    return set(saved_wifi_profiles())
+
+
+def active_wifi_connection():
+    """Name of the connection profile wlan0 is using, or None."""
+    ok, output = _nmcli(["-t", "-f", "GENERAL.CONNECTION", "device", "show", "wlan0"])
+    if not ok:
+        return None
+    for line in output.splitlines():
+        if line.startswith("GENERAL.CONNECTION:"):
+            return line.split(":", 1)[1] or None
+    return None
+
+
+def set_wifi_autoconnect(name, enabled):
+    """Turn joining a saved network on its own on or off. Returns ok."""
+    ok, output = _nmcli(
+        ["connection", "modify", "id", name, "connection.autoconnect", "yes" if enabled else "no"]
+    )
+    if not ok:
+        logger.info(f"Setting autoconnect of {name!r} failed: {output}")
+    return ok
+
+
+def forget_wifi(name):
+    """Delete a saved network, password included. Returns ok."""
+    ok, output = _nmcli(["connection", "delete", "id", name])
+    if not ok:
+        logger.info(f"Forgetting WiFi network {name!r} failed: {output}")
+    return ok
 
 
 # The stock keyboard's symbol page (keybdA) has curly double quotes but no
@@ -199,23 +233,36 @@ def clean_wifi_password(password):
 
 
 def connect_wifi(ssid, password=None):
-    """Connect wlan0 to ssid, returning (ok, message).
+    """Connect wlan0 to ssid, returning (ok, message, fallback).
 
     Without a password nmcli uses the saved profile for that SSID, or joins an
     open network. If a new profile was created and the connection failed (wrong
     password, out of range), it is deleted so it doesn't linger with a bad key.
+
+    nmcli drops the current network to try the new one, so after a failure the
+    previous connection is brought back up; fallback is its name when that
+    worked, else None.
     """
+    previous = active_wifi_connection()
     existed = ssid in saved_wifi_connections()
     args = ["dev", "wifi", "connect", ssid]
     if password:
         args += ["password", password]
     args += ["ifname", "wlan0"]
     ok, output = _nmcli(args, timeout=_NMCLI_CONNECT_TIMEOUT)
-    if not ok:
-        logger.info(f"WiFi connect to {ssid!r} failed: {output}")
-        if not existed and ssid in saved_wifi_connections():
-            _nmcli(["connection", "delete", "id", ssid])
-    return ok, output
+    if ok:
+        return ok, output, None
+    logger.info(f"WiFi connect to {ssid!r} failed: {output}")
+    if not existed and ssid in saved_wifi_connections():
+        _nmcli(["connection", "delete", "id", ssid])
+    fallback = None
+    if previous and previous != ssid:
+        back, back_output = _nmcli(["connection", "up", "id", previous], timeout=_NMCLI_CONNECT_TIMEOUT)
+        if back:
+            fallback = previous
+        else:
+            logger.info(f"Reconnecting to {previous!r} failed: {back_output}")
+    return ok, output, fallback
 
 
 def wifi_radio_enabled():

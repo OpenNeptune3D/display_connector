@@ -1,11 +1,15 @@
 import asyncio
 import re
 import subprocess
+from contextlib import ExitStack, contextmanager
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src import wifi
+from src.colors import TEXT_HIGHLIGHT, TEXT_NORMAL, TEXT_SUCCESS
+from src.communicator import DisplayCommunicator
 from src.controller.display_events import DisplayEventsMixin
 from src.controller.wifi_settings import WifiSettingsMixin
 from src.elegoo_display import ElegooDisplayMapper
@@ -14,6 +18,9 @@ from src.elegoo_display.wifi_screens import ElegooWifiScreensMixin
 from src.mapping import (
     PAGE_OVERLAY_LOADING,
     PAGE_SETTINGS_WIFI,
+    PAGE_SETTINGS_WIFI_CONFIRM,
+    PAGE_SETTINGS_WIFI_MENU,
+    PAGE_SETTINGS_WIFI_MESSAGE,
     PAGE_SETTINGS_WIFI_PASSWORD,
 )
 
@@ -49,41 +56,89 @@ def test_scan_networks_failure_returns_empty():
         assert wifi.scan_networks() == []
 
 
-def test_connect_failure_deletes_new_profile():
+def fake_nmcli(active="Home", profiles="Home:802-11-wireless:yes", connect_error=None,
+               profile_after_attempt=None, up_ok=True):
+    """subprocess.run standing in for nmcli; returns (run, calls)."""
     calls = []
 
     def run(args, **kwargs):
-        calls.append(args[1:])
-        if args[1:3] == ["dev", "wifi"]:
-            return _completed(returncode=4, stderr="Secrets were required, but not provided")
-        if args[1:4] == ["-t", "-f", "NAME,TYPE"]:
-            # before the attempt there is no profile, afterwards nmcli left one behind
-            existing = "Home:802-11-wireless" if any(c[:2] == ["dev", "wifi"] for c in calls) else ""
-            return _completed(existing)
+        args = args[1:]
+        calls.append(args)
+        if args[:3] == ["dev", "wifi", "connect"]:
+            if connect_error:
+                return _completed(returncode=4, stderr=connect_error)
+            return _completed("Device 'wlan0' successfully activated")
+        if args[:3] == ["-t", "-f", "GENERAL.CONNECTION"]:
+            return _completed(f"GENERAL.CONNECTION:{active or ''}")
+        if args[:3] == ["-t", "-f", "NAME,TYPE,AUTOCONNECT"]:
+            attempted = any(c[:3] == ["dev", "wifi", "connect"] for c in calls)
+            if attempted and profile_after_attempt:
+                return _completed(f"{profiles}\n{profile_after_attempt}")
+            return _completed(profiles)
+        if args[:2] == ["connection", "up"]:
+            return _completed() if up_ok else _completed(returncode=4, stderr="no network")
         return _completed()
 
+    return run, calls
+
+
+def test_connect_failure_deletes_new_profile_and_goes_back_to_the_previous_network():
+    run, calls = fake_nmcli(
+        connect_error="Secrets were required, but not provided",
+        profile_after_attempt="Office:802-11-wireless:yes",  # nmcli left one behind
+    )
     with patch.object(wifi.subprocess, "run", side_effect=run):
-        ok, message = wifi.connect_wifi("Home", "wrong")
+        ok, message, fallback = wifi.connect_wifi("Office", "wrong")
     assert not ok
     assert "Secrets" in message
-    assert ["dev", "wifi", "connect", "Home", "password", "wrong", "ifname", "wlan0"] in calls
-    assert ["connection", "delete", "id", "Home"] in calls
+    assert ["dev", "wifi", "connect", "Office", "password", "wrong", "ifname", "wlan0"] in calls
+    assert ["connection", "delete", "id", "Office"] in calls
+    assert ["connection", "up", "id", "Home"] in calls
+    assert fallback == "Home"
 
 
 def test_connect_failure_keeps_existing_profile():
-    calls = []
-
-    def run(args, **kwargs):
-        calls.append(args[1:])
-        if args[1:3] == ["dev", "wifi"]:
-            return _completed(returncode=4, stderr="timeout")
-        if args[1:4] == ["-t", "-f", "NAME,TYPE"]:
-            return _completed("Home:802-11-wireless")
-        return _completed()
-
+    run, calls = fake_nmcli(active=None, profiles="Home:802-11-wireless:yes", connect_error="timeout")
     with patch.object(wifi.subprocess, "run", side_effect=run):
-        wifi.connect_wifi("Home")
+        ok, _, fallback = wifi.connect_wifi("Home")
+    assert not ok and fallback is None
     assert ["connection", "delete", "id", "Home"] not in calls
+    assert not any(c[:2] == ["connection", "up"] for c in calls)  # nothing to go back to
+
+
+def test_connect_failure_reports_no_fallback_when_the_previous_network_is_gone():
+    run, _ = fake_nmcli(connect_error="timeout", up_ok=False)
+    with patch.object(wifi.subprocess, "run", side_effect=run):
+        assert wifi.connect_wifi("Office", "secret123")[2] is None
+
+
+def test_connect_success_has_no_fallback():
+    run, calls = fake_nmcli()
+    with patch.object(wifi.subprocess, "run", side_effect=run):
+        assert wifi.connect_wifi("Office", "secret123") == (True, "Device 'wlan0' successfully activated", None)
+    assert not any(c[:2] == ["connection", "up"] for c in calls)
+
+
+def test_saved_profiles_with_autoconnect():
+    output = "Home:802-11-wireless:yes\nWired:802-3-ethernet:yes\nCafe\\:2:802-11-wireless:no"
+    with patch.object(wifi.subprocess, "run", return_value=_completed(output)):
+        assert wifi.saved_wifi_profiles() == {"Home": True, "Cafe:2": False}
+        assert wifi.saved_wifi_connections() == {"Home", "Cafe:2"}
+
+
+@pytest.mark.parametrize("enabled, value", [(True, "yes"), (False, "no")])
+def test_set_autoconnect(enabled, value):
+    run, calls = fake_nmcli()
+    with patch.object(wifi.subprocess, "run", side_effect=run):
+        assert wifi.set_wifi_autoconnect("Home", enabled) is True
+    assert calls == [["connection", "modify", "id", "Home", "connection.autoconnect", value]]
+
+
+def test_forget():
+    run, calls = fake_nmcli()
+    with patch.object(wifi.subprocess, "run", side_effect=run):
+        assert wifi.forget_wifi("Home") is True
+    assert calls == [["connection", "delete", "id", "Home"]]
 
 
 def test_clean_wifi_password_maps_curly_quotes():
@@ -119,8 +174,7 @@ class FakeController(WifiSettingsMixin):
         self.history = [page]
         self.display = MagicMock()
         self.display.draw_wifi_list = AsyncMock()
-        self.display.draw_wifi_header = AsyncMock()
-        self.display.draw_wifi_password = AsyncMock()
+        self.display.draw_wifi_menu = AsyncMock()
         self._init_wifi_settings()
 
     async def _navigate_to_page(self, page):
@@ -128,6 +182,15 @@ class FakeController(WifiSettingsMixin):
 
     async def _go_back(self):
         self.history.pop()
+
+    async def run(self, action):
+        """Handle a touch screen action and wait for the WiFi work it starts."""
+        self.handle_wifi_action(action)
+        if self._wifi_task is not None:
+            await self._wifi_task
+
+    def message(self):
+        return self.display.stage_wifi_message.call_args.args[0]
 
 
 NETWORKS = [
@@ -137,25 +200,172 @@ NETWORKS = [
 ]
 
 
+@contextmanager
+def nm(profiles=None, connect=(True, "", None), networks=NETWORKS, permitted=True):
+    """Stand-ins for the nmcli helpers wifi_settings uses."""
+    mocks = SimpleNamespace(
+        saved_wifi_profiles=MagicMock(return_value={"Home": True} if profiles is None else profiles),
+        scan_networks=MagicMock(side_effect=lambda rescan=True: [dict(n) for n in networks]),
+        connect_wifi=MagicMock(side_effect=connect) if callable(connect) else MagicMock(return_value=connect),
+        wifi_radio_enabled=MagicMock(return_value=True),
+        get_wlan0_ip=MagicMock(return_value="10.0.0.2"),
+        wifi_permitted=MagicMock(return_value=permitted),
+        set_wifi_autoconnect=MagicMock(return_value=True),
+        forget_wifi=MagicMock(return_value=True),
+    )
+    with ExitStack() as stack:
+        for name, mock in vars(mocks).items():
+            stack.enter_context(patch(f"src.controller.wifi_settings.{name}", mock))
+        yield mocks
+
+
+async def list_controller(**nm_args):
+    controller = FakeController()
+    with nm(**nm_args):
+        await controller._wifi_scan()
+    return controller
+
+
+@pytest.mark.asyncio
+async def test_scan_marks_saved_networks():
+    controller = await list_controller(profiles={"Home": True, "Office": False})
+    assert [(n["saved"], n["autoconnect"]) for n in controller.wifi_networks] == [
+        (True, True), (True, False), (False, None),
+    ]
+
+
 @pytest.mark.asyncio
 async def test_secured_unknown_network_asks_for_password_then_connects():
-    controller = FakeController()
-    controller.wifi_networks = list(NETWORKS)
-    with patch("src.controller.wifi_settings.saved_wifi_connections", return_value={"Home"}), \
-         patch("src.controller.wifi_settings.connect_wifi", return_value=(True, "")) as connect, \
-         patch("src.controller.wifi_settings.scan_networks", return_value=NETWORKS), \
-         patch("src.controller.wifi_settings.wifi_radio_enabled", return_value=True), \
-         patch("src.controller.wifi_settings.get_wlan0_ip", return_value="10.0.0.2"):
-        controller.handle_wifi_action("wifi_select_1")
-        await controller._wifi_task
-        assert controller.history[-1] == PAGE_SETTINGS_WIFI_PASSWORD
-        controller.display.draw_wifi_password.assert_awaited_once_with("Office")
+    controller = await list_controller()
+    with nm() as mocks:
+        await controller.run("wifi_select_1")
+        assert controller.history == [PAGE_SETTINGS_WIFI, PAGE_SETTINGS_WIFI_PASSWORD]
+        controller.display.stage_wifi_password.assert_called_once_with("Office")
 
         controller.handle_wifi_password("secret123")
         await controller._wifi_task
-    connect.assert_called_once_with("Office", "secret123")
+        mocks.connect_wifi.assert_called_once_with("Office", "secret123")
+        assert controller.history == [PAGE_SETTINGS_WIFI, PAGE_SETTINGS_WIFI_MESSAGE]
+        assert controller.message() == "Connected to Office"
+
+        await controller.run("wifi_message_ok")
     assert controller.history == [PAGE_SETTINGS_WIFI]
-    assert controller.wifi_status == "Connected"
+
+
+@pytest.mark.asyncio
+async def test_saved_network_opens_its_menu():
+    controller = await list_controller(profiles={"Home": True, "Office": False})
+    with nm(profiles={"Home": True, "Office": False}) as mocks:
+        await controller.run("wifi_select_1")
+        assert controller.history == [PAGE_SETTINGS_WIFI, PAGE_SETTINGS_WIFI_MENU]
+        controller.display.stage_wifi_menu.assert_called_once_with("Office", False, False)
+
+        await controller.run("wifi_menu_connect")
+    mocks.connect_wifi.assert_called_once_with("Office", None)
+    assert controller.history == [PAGE_SETTINGS_WIFI, PAGE_SETTINGS_WIFI_MESSAGE]
+    assert controller.message() == "Connected to Office"
+
+
+@pytest.mark.asyncio
+async def test_connected_network_menu_does_not_reconnect():
+    controller = await list_controller()
+    with nm() as mocks:
+        await controller.run("wifi_select_0")
+        controller.display.stage_wifi_menu.assert_called_once_with("Home", True, True)
+        await controller.run("wifi_menu_connect")
+    mocks.connect_wifi.assert_not_called()
+    assert controller.history == [PAGE_SETTINGS_WIFI, PAGE_SETTINGS_WIFI_MENU]
+
+
+@pytest.mark.asyncio
+async def test_menu_toggles_autoconnect():
+    controller = await list_controller(profiles={"Home": True, "Office": False})
+    with nm(profiles={"Home": True, "Office": False}) as mocks:
+        await controller.run("wifi_select_1")
+        await controller.run("wifi_menu_autoconnect")
+        mocks.set_wifi_autoconnect.assert_called_once_with("Office", True)
+        controller.display.draw_wifi_menu.assert_awaited_with("Office", False, True)
+        await controller.run("wifi_menu_autoconnect")
+        mocks.set_wifi_autoconnect.assert_called_with("Office", False)
+    assert controller.history == [PAGE_SETTINGS_WIFI, PAGE_SETTINGS_WIFI_MENU]
+
+
+@pytest.mark.asyncio
+async def test_forget_asks_first():
+    controller = await list_controller(profiles={"Home": True, "Office": True})
+    with nm(profiles={"Home": True, "Office": True}) as mocks:
+        await controller.run("wifi_select_1")
+        await controller.run("wifi_menu_forget")
+        assert controller.history == [PAGE_SETTINGS_WIFI, PAGE_SETTINGS_WIFI_CONFIRM]
+        controller.display.stage_wifi_confirm.assert_called_once_with("Forget?", "Forget Office")
+        mocks.forget_wifi.assert_not_called()
+
+        await controller.run("wifi_confirm_yes")
+    mocks.forget_wifi.assert_called_once_with("Office")
+    assert controller.history == [PAGE_SETTINGS_WIFI, PAGE_SETTINGS_WIFI_MESSAGE]
+    assert controller.message() == "Office forgotten"
+
+
+@pytest.mark.asyncio
+async def test_forget_can_be_cancelled():
+    controller = await list_controller(profiles={"Home": True, "Office": True})
+    with nm(profiles={"Home": True, "Office": True}) as mocks:
+        await controller.run("wifi_select_1")
+        await controller.run("wifi_menu_forget")
+        await controller.run("wifi_confirm_no")
+    mocks.forget_wifi.assert_not_called()
+    assert controller.history == [PAGE_SETTINGS_WIFI]
+
+
+@pytest.mark.asyncio
+async def test_open_network_asks_before_joining():
+    controller = await list_controller()
+    with nm() as mocks:
+        await controller.run("wifi_select_2")
+        assert controller.history == [PAGE_SETTINGS_WIFI, PAGE_SETTINGS_WIFI_CONFIRM]
+        controller.display.stage_wifi_confirm.assert_called_once_with("Open network", "Join Cafe")
+        mocks.connect_wifi.assert_not_called()
+
+        await controller.run("wifi_confirm_yes")
+    mocks.connect_wifi.assert_called_once_with("Cafe", None)
+    assert controller.history == [PAGE_SETTINGS_WIFI, PAGE_SETTINGS_WIFI_MESSAGE]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["wifi_menu_forget", "wifi_menu_connect", "wifi_confirm_yes", "wifi_message_ok"])
+async def test_dialog_actions_only_work_on_their_own_page(action):
+    controller = await list_controller(profiles={"Home": True, "Office": True})
+    controller.wifi_menu_network = controller.wifi_networks[1]
+    controller._wifi_question = ("forget", "Office")
+    with nm() as mocks:
+        await controller.run(action)
+    assert controller.history == [PAGE_SETTINGS_WIFI]
+    mocks.connect_wifi.assert_not_called()
+    mocks.forget_wifi.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("result, message", [
+    ((False, "Error: Secrets were required, but not provided", None), "Wrong password for Office"),
+    ((False, "Error: 802-11-wireless-security.psk: property is invalid", None), "Wrong password for Office"),
+    ((False, "Error: Secrets were required, but not provided", "Home"), "Wrong password for Office. Back on Home"),
+    ((False, "Error: Connection activation failed: timeout", "Home"), "Could not connect to Office. Back on Home"),
+])
+async def test_failed_connect_says_why(result, message):
+    controller = keyboard_open_on("Office")
+    with nm(connect=result):
+        controller.handle_wifi_password("secret123")
+        await controller._wifi_task
+    assert controller.message() == message
+
+
+@pytest.mark.asyncio
+async def test_connect_without_permission_asks_for_a_restart():
+    controller = keyboard_open_on("Office")
+    with nm(connect=(False, "Error: Not authorized", None), permitted=False):
+        controller.handle_wifi_password("secret123")
+        await controller._wifi_task
+    assert controller.message() == "WiFi settings need a printer restart first"
 
 
 @pytest.mark.parametrize("component", [1, 2, 3, 8])
@@ -171,53 +381,47 @@ def test_text_from_other_pages_is_ignored():
     controller.handle_wifi_password.assert_not_called()
 
 
-@pytest.mark.asyncio
-async def test_curly_quotes_from_keyboard_connect_as_straight_quotes():
+def keyboard_open_on(ssid):
     controller = FakeController(page=PAGE_SETTINGS_WIFI_PASSWORD)
     controller.history = [PAGE_SETTINGS_WIFI, PAGE_SETTINGS_WIFI_PASSWORD]
-    controller.wifi_selected_ssid = "Office"
-    with patch("src.controller.wifi_settings.connect_wifi", return_value=(True, "")) as connect, \
-         patch("src.controller.wifi_settings.scan_networks", return_value=NETWORKS), \
-         patch("src.controller.wifi_settings.wifi_radio_enabled", return_value=True), \
-         patch("src.controller.wifi_settings.get_wlan0_ip", return_value=None):
+    controller.wifi_selected_ssid = ssid
+    return controller
+
+
+@pytest.mark.asyncio
+async def test_curly_quotes_from_keyboard_connect_as_straight_quotes():
+    controller = keyboard_open_on("Office")
+    with nm() as mocks:
         controller.handle_wifi_password("say“hi”")
         await controller._wifi_task
-    connect.assert_called_once_with("Office", 'say"hi"')
+    mocks.connect_wifi.assert_called_once_with("Office", 'say"hi"')
 
 
 @pytest.mark.asyncio
 async def test_password_goes_from_keyboard_straight_to_the_loading_overlay():
-    controller = FakeController(page=PAGE_SETTINGS_WIFI_PASSWORD)
-    controller.history = [PAGE_SETTINGS_WIFI, PAGE_SETTINGS_WIFI_PASSWORD]
-    controller.wifi_selected_ssid = "Office"
+    controller = keyboard_open_on("Office")
     seen = []
 
     def connect(ssid, password):
         seen.append(list(controller.history))
-        return False, "Secrets were required"
+        return False, "Secrets were required", None
 
-    with patch("src.controller.wifi_settings.connect_wifi", side_effect=connect), \
-         patch("src.controller.wifi_settings.scan_networks", return_value=NETWORKS), \
-         patch("src.controller.wifi_settings.wifi_radio_enabled", return_value=True), \
-         patch("src.controller.wifi_settings.get_wlan0_ip", return_value=None):
+    with nm(connect=connect):
         controller.handle_wifi_password("secret123")
         await controller._wifi_task
     assert seen == [[PAGE_SETTINGS_WIFI, PAGE_OVERLAY_LOADING]]
-    assert controller.history == [PAGE_SETTINGS_WIFI]
-    assert controller.wifi_status == "Wrong password"
+    assert controller.history == [PAGE_SETTINGS_WIFI, PAGE_SETTINGS_WIFI_MESSAGE]
 
 
 @pytest.mark.asyncio
 async def test_impossible_password_is_not_sent_to_nmcli():
-    controller = FakeController(page=PAGE_SETTINGS_WIFI_PASSWORD)
-    controller.history = [PAGE_SETTINGS_WIFI, PAGE_SETTINGS_WIFI_PASSWORD]
-    controller.wifi_selected_ssid = "Office"
-    with patch("src.controller.wifi_settings.connect_wifi") as connect:
+    controller = keyboard_open_on("Office")
+    with nm() as mocks:
         controller.handle_wifi_password("pass€word")
-        await asyncio.sleep(0)
-    connect.assert_not_called()
-    assert controller.wifi_status == "Invalid char"
-    assert controller.history == [PAGE_SETTINGS_WIFI]
+        await controller._wifi_task
+    mocks.connect_wifi.assert_not_called()
+    assert controller.message() == "The password has a character WiFi passwords can't have"
+    assert controller.history == [PAGE_SETTINGS_WIFI, PAGE_SETTINGS_WIFI_MESSAGE]
 
 
 MODE_KEY = (0, 440, 60, 480)
@@ -287,12 +491,10 @@ async def test_relabel_failure_does_not_escape():
 
 @pytest.mark.asyncio
 async def test_opening_the_keyboard_reads_its_mode_key():
-    controller = FakeController()
-    controller.wifi_networks = list(NETWORKS)
+    controller = await list_controller()
     controller.display.wifi_keyboard_mode_key = AsyncMock(return_value=MODE_KEY)
-    with patch("src.controller.wifi_settings.saved_wifi_connections", return_value=set()):
-        controller.handle_wifi_action("wifi_select_1")
-        await controller._wifi_task
+    with nm():
+        await controller.run("wifi_select_1")
     assert controller.wifi_keyboard_mode_key == MODE_KEY
 
 
@@ -310,6 +512,9 @@ class FakeKeyboardPanel(ElegooWifiScreensMixin):
         self._serial_lock = asyncio.Lock()
 
     def _write_without_response(self, command):
+        self.writes.append(command)
+
+    async def write(self, command):
         self.writes.append(command)
 
     async def _execute_command(self, command, timeout=None):
@@ -355,19 +560,12 @@ async def test_symbol_page_gets_the_missing_ascii_symbols():
 
 
 @pytest.mark.asyncio
-async def test_open_network_connects_without_keyboard():
-    controller = FakeController()
-    controller.wifi_networks = list(NETWORKS)
-    with patch("src.controller.wifi_settings.saved_wifi_connections", return_value=set()), \
-         patch("src.controller.wifi_settings.connect_wifi", return_value=(False, "Secrets were required")) as connect, \
-         patch("src.controller.wifi_settings.scan_networks", return_value=NETWORKS), \
-         patch("src.controller.wifi_settings.wifi_radio_enabled", return_value=True), \
-         patch("src.controller.wifi_settings.get_wlan0_ip", return_value=None):
-        controller.handle_wifi_action("wifi_select_2")
-        await controller._wifi_task
-    connect.assert_called_once_with("Cafe", None)
-    assert PAGE_OVERLAY_LOADING not in controller.history
-    assert controller.wifi_status == "Wrong password"
+async def test_saved_open_network_opens_its_menu_without_asking():
+    controller = await list_controller(profiles={"Home": True, "Cafe": True})
+    with nm(profiles={"Home": True, "Cafe": True}):
+        await controller.run("wifi_select_2")
+    assert controller.history == [PAGE_SETTINGS_WIFI, PAGE_SETTINGS_WIFI_MENU]
+    controller.display.stage_wifi_confirm.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -385,29 +583,79 @@ async def test_paging_stays_in_range():
 
 
 @pytest.mark.asyncio
-async def test_status_line_is_covered_before_the_slow_nmcli_calls():
-    controller = FakeController()
-    controller.wifi_networks = list(NETWORKS)
-    order = []
-    controller.display.draw_wifi_header = AsyncMock(side_effect=lambda *a: order.append(("header", a)))
+async def test_list_status_shows_the_connected_network():
+    controller = await list_controller()
+    controller.display.draw_wifi_list.assert_awaited_with(controller.wifi_networks, 0, "Home", "10.0.0.2")
 
-    def radio():
-        order.append("nmcli")
-        return True
 
-    with patch("src.controller.wifi_settings.wifi_radio_enabled", side_effect=radio), \
-         patch("src.controller.wifi_settings.get_wlan0_ip", return_value="10.0.0.2"):
-        await controller._draw_wifi_list()  # first visit: nothing known yet, blank it
-        controller.wifi_status = "Wrong password"
-        await controller._draw_wifi_list()
-        controller.wifi_status = None
-        await controller._draw_wifi_list()  # back from elsewhere: last known status
-    assert order == [
-        ("header", ("", None)), "nmcli",
-        ("header", ("Wrong password", "10.0.0.2")), "nmcli",
-        ("header", ("Wrong password", "10.0.0.2")), "nmcli",
+@pytest.mark.asyncio
+async def test_list_draws_lock_signal_and_saved_colours():
+    panel = FakeKeyboardPanel()
+    networks = [
+        dict(NETWORKS[0], saved=True),  # connected
+        dict(NETWORKS[1], saved=True),  # saved
+        dict(NETWORKS[2], signal=20, saved=False),  # open, weak
     ]
-    controller.display.draw_wifi_list.assert_awaited_with(NETWORKS, 0, "Home", "10.0.0.2")
+    await panel.draw_wifi_list(networks, 0, "Home", "10.0.0.2")
+    writes = panel.writes
+    assert f"wifi_list.b[4].pco={TEXT_SUCCESS}" in writes
+    assert f"wifi_list.b[7].pco={TEXT_HIGHLIGHT}" in writes
+    assert f"wifi_list.b[10].pco={TEXT_NORMAL}" in writes
+    assert ["b[32].picc=341", "b[33].picc=341", "b[34].picc=340"] == [
+        w for w in writes if re.match(r"b\[3[2-4]\]\.picc", w)
+    ]
+    assert ["b[5].picc=343", "b[8].picc=343", "b[11].picc=341"] == [
+        w for w in writes if re.match(r"b\[(5|8|11)\]\.picc", w)
+    ]
+    assert "vis b[12],0" in writes  # row 4 and later are empty
+
+
+@pytest.mark.asyncio
+async def test_pages_get_their_texts_as_they_open():
+    panel = FakeKeyboardPanel()
+    await panel.draw_wifi_header("Home", "10.0.0.2")
+    panel.stage_wifi_menu("Office", False, True)
+    panel.stage_wifi_confirm("Forget?", "Forget Office")
+    panel.stage_wifi_message("Connected to Office")
+    panel.stage_wifi_password("Office")
+    assert panel.page_entry_commands("wifi_list") == ['b[27].txt="Home"', 'b[28].txt="IP:10.0.0.2"']
+    assert panel.page_entry_commands("134") == [
+        'b[2].txt="Office"', 'b[4].txt="Connect"', 'b[7].txt="Auto-connect: On"', 'b[9].txt="Forget network"',
+    ]
+    assert panel.page_entry_commands("136") == [
+        'b[2].txt="Forget?"', 'b[4].txt="Forget Office"', 'b[7].txt="Cancel"',
+    ]
+    assert panel.page_entry_commands("125") == [
+        'b[1].txt="WLAN"', 'b[3].txt="Connected to Office"', 'b[4].txt="OK"',
+    ]
+    assert panel.page_entry_commands("keybdA") == ['b[49].txt="Office"', 'b[35].txt=""', 'b[34].txt=""']
+    assert panel.page_entry_commands("main") == []
+
+
+@pytest.mark.asyncio
+async def test_navigation_sends_page_entry_commands_before_anything_queued():
+    sent = []
+
+    class Panel:
+        navigate_to = DisplayCommunicator.navigate_to
+
+        def __init__(self):
+            self._nav_lock = asyncio.Lock()
+
+        async def write(self, command, blocked_key=None, auto_unblock=True):
+            sent.append((command, blocked_key))
+
+        async def unblock(self, key):
+            sent.append(("unblock", key))
+
+        def page_entry_commands(self, page_id):
+            return ['b[27].txt="Home"'] if page_id == "wifi_list" else []
+
+    with patch("src.communicator.asyncio.sleep", AsyncMock()):
+        await Panel().navigate_to("wifi_list")
+    assert sent == [
+        ("page wifi_list", "__nav__"), ('b[27].txt="Home"', "__nav__"), ("unblock", "__nav__"),
+    ]
 
 
 @pytest.mark.asyncio

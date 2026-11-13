@@ -6,11 +6,16 @@ from src.mapping import (
     PAGE_SETTINGS,
     PAGE_SETTINGS_WIFI,
     PAGE_SETTINGS_WIFI_PASSWORD,
+    PAGE_SETTINGS_WIFI_MENU,
+    PAGE_SETTINGS_WIFI_CONFIRM,
+    PAGE_SETTINGS_WIFI_MESSAGE,
 )
 from src.colors import (
+    TEXT_HIGHLIGHT,
     TEXT_NORMAL,
     TEXT_SUCCESS,
 )
+from src.wifi import categorize_signal_strength
 
 WIFI_ROWS_PER_PAGE = 8
 
@@ -20,10 +25,28 @@ _ROW_BUTTON, _ROW_TEXT, _ROW_SIGNAL, _ROW_LOCK = 3, 4, 5, 32
 _STATUS_TEXT = 27  # left of the header line, "Label" in the stock HMI
 _IP_TEXT = 28
 _SSID_MAX_CHARS = 18
+# The icons are crops of full-page pictures: 340 has none, 341 has the lock (in
+# the lock column) and one signal bar, 342-344 two to four bars
+_ICON_NONE = 340
+_ICON_LOCK = 341
+_ICON_SIGNAL_BASE = 340  # + 1-4 bars
 
-# keybdA component ids
+# Saved network menu (stock "Print mode" list): title and three row texts
+_MENU_TITLE = 2
+_MENU_ROWS = (4, 7, 9)
+# Yes/no question (stock "Leveling mode" list): title and two row texts
+_CONFIRM_TITLE = 2
+_CONFIRM_ROWS = (4, 7)
+# Message (stock PID "Detection completed" page): title, text and the button
+_MESSAGE_TITLE = 1
+_MESSAGE_TEXT = 3
+_MESSAGE_BUTTON = 4
+
+# keybdA component ids: the input shows the typed text, which is kept in the
+# _KEYBOARD_TEXT variable; OK sends that variable
 _KEYBOARD_TITLE = 49
 _KEYBOARD_INPUT = 35
+_KEYBOARD_TEXT = 34
 
 _KEYBOARD_BURST_SETTLE = 0.05
 
@@ -70,8 +93,57 @@ def _shorten(text, limit):
     return text if len(text) <= limit else text[: limit - 2] + ".."
 
 
+def _text(component, text, limit=None):
+    """Set a text on the current page."""
+    if limit is not None:
+        text = _shorten(text, limit)
+    return f'b[{component}].txt="{_quote(text)}"'
+
+
 class ElegooWifiScreensMixin:
-    """WiFi network list and password keyboard."""
+    """WiFi network list, password keyboard and the dialogs around them.
+
+    The dialogs are stock pages with their texts swapped. Their texts are sent
+    as page entry commands, right after the page switch, so the stock ones
+    never show.
+    """
+
+    def page_entry_commands(self, page_id):
+        return list(getattr(self, "_wifi_page_entry", {}).get(page_id, ()))
+
+    def _set_page_entry(self, page, commands):
+        if not hasattr(self, "_wifi_page_entry"):
+            self._wifi_page_entry = {}
+        self._wifi_page_entry[self.mapper.map_page(page)] = commands
+
+    def stage_wifi_menu(self, ssid, connected, autoconnect):
+        """Texts for the saved network menu, for the next time it is shown."""
+        self._set_page_entry(PAGE_SETTINGS_WIFI_MENU, [
+            _text(_MENU_TITLE, ssid, 20),
+            _text(_MENU_ROWS[0], "Connected" if connected else "Connect"),
+            _text(_MENU_ROWS[1], f"Auto-connect: {'On' if autoconnect else 'Off'}"),
+            _text(_MENU_ROWS[2], "Forget network"),
+        ])
+
+    async def draw_wifi_menu(self, ssid, connected, autoconnect):
+        """Redraw the saved network menu while it is shown."""
+        self.stage_wifi_menu(ssid, connected, autoconnect)
+        for command in self.page_entry_commands(self.mapper.map_page(PAGE_SETTINGS_WIFI_MENU)):
+            await self.write(command)
+
+    def stage_wifi_confirm(self, title, yes, no="Cancel"):
+        self._set_page_entry(PAGE_SETTINGS_WIFI_CONFIRM, [
+            _text(_CONFIRM_TITLE, title, 12),
+            _text(_CONFIRM_ROWS[0], yes, 16),
+            _text(_CONFIRM_ROWS[1], no, 16),
+        ])
+
+    def stage_wifi_message(self, text, title="WLAN", button="OK"):
+        self._set_page_entry(PAGE_SETTINGS_WIFI_MESSAGE, [
+            _text(_MESSAGE_TITLE, title),
+            _text(_MESSAGE_TEXT, text, 60),
+            _text(_MESSAGE_BUTTON, button),
+        ])
 
     async def update_settings_page(self):
         # Only set_4_max needs this; the "set" page has its own Temperature row
@@ -106,23 +178,40 @@ class ElegooWifiScreensMixin:
             await self.write(
                 f'{prefix}.b[{text_id}].txt="{_quote(_shorten(network["ssid"], _SSID_MAX_CHARS))}"'
             )
-            await self.write(
-                f"{prefix}.b[{text_id}].pco={TEXT_SUCCESS if network['in_use'] else TEXT_NORMAL}"
-            )
-            # The stock signal and lock icon pictures aren't mapped yet
-            await self.write(f"vis b[{ids[2]}],0")
-            await self.write(f"vis b[{ids[3]}],0")
+            if network["in_use"]:
+                color = TEXT_SUCCESS
+            elif network.get("saved"):
+                color = TEXT_HIGHLIGHT
+            else:
+                color = TEXT_NORMAL
+            await self.write(f"{prefix}.b[{text_id}].pco={color}")
+            bars = categorize_signal_strength(network["signal"])
+            await self.write(f"b[{ids[2]}].picc={_ICON_SIGNAL_BASE + bars if bars else _ICON_NONE}")
+            await self.write(f"vis b[{ids[2]}],1")
+            await self.write(f"b[{ids[3]}].picc={_ICON_LOCK if network['secured'] else _ICON_NONE}")
+            await self.write(f"vis b[{ids[3]}],1")
 
     async def draw_wifi_header(self, status, ip):
-        """The status and IP texts above the wifi_list rows."""
-        prefix = self.mapper.map_page(PAGE_SETTINGS_WIFI)
-        await self.write(f'{prefix}.b[{_STATUS_TEXT}].txt="{_quote(_shorten(status, 12))}"')
-        await self.write(f'{prefix}.b[{_IP_TEXT}].txt="{"IP:" + ip if ip else ""}"')
+        """The status and IP texts above the wifi_list rows.
 
-    async def draw_wifi_password(self, ssid):
-        prefix = self.mapper.map_page(PAGE_SETTINGS_WIFI_PASSWORD)
-        await self.write(f'{prefix}.b[{_KEYBOARD_TITLE}].txt="{_quote(_shorten(ssid, 20))}"')
-        await self.write(f'{prefix}.b[{_KEYBOARD_INPUT}].txt=""')
+        Also kept as page entry commands, so coming back to the list shows the
+        last status straight away instead of the stock "Label".
+        """
+        commands = [
+            _text(_STATUS_TEXT, status, 12),
+            f'b[{_IP_TEXT}].txt="{"IP:" + ip if ip else ""}"',
+        ]
+        self._set_page_entry(PAGE_SETTINGS_WIFI, commands)
+        for command in commands:
+            await self.write(command)
+
+    def stage_wifi_password(self, ssid):
+        """Keyboard title, and nothing typed yet, for the next time it is shown."""
+        self._set_page_entry(PAGE_SETTINGS_WIFI_PASSWORD, [
+            _text(_KEYBOARD_TITLE, ssid, 20),
+            f'b[{_KEYBOARD_INPUT}].txt=""',
+            f'b[{_KEYBOARD_TEXT}].txt=""',
+        ])
 
     async def wifi_keyboard_mode_key(self):
         """Where keybdA's letters/symbols key is, as (x0, y0, x1, y1).

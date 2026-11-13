@@ -6,13 +6,18 @@ from src.mapping import (
     PAGE_OVERLAY_LOADING,
     PAGE_SETTINGS_WIFI,
     PAGE_SETTINGS_WIFI_PASSWORD,
+    PAGE_SETTINGS_WIFI_MENU,
+    PAGE_SETTINGS_WIFI_CONFIRM,
+    PAGE_SETTINGS_WIFI_MESSAGE,
 )
 from src.wifi import (
     clean_wifi_password,
     connect_wifi,
+    forget_wifi,
     get_wlan0_ip,
-    saved_wifi_connections,
+    saved_wifi_profiles,
     scan_networks,
+    set_wifi_autoconnect,
     set_wifi_radio,
     wifi_permitted,
     wifi_radio_enabled,
@@ -32,16 +37,35 @@ def _inside(bounds, x, y):
     return x0 <= x < x1 and y0 <= y < y1
 
 
+def _annotate(networks, profiles):
+    """Mark which scanned networks have a saved profile, and its autoconnect."""
+    for network in networks:
+        network["saved"] = network["ssid"] in profiles
+        network["autoconnect"] = profiles.get(network["ssid"])
+    return networks
+
+
+def _load_networks(rescan):
+    """Scan (or list what NetworkManager knows) and mark the saved networks."""
+    return _annotate(scan_networks(rescan), saved_wifi_profiles())
+
+
 class WifiSettingsMixin:
-    """WiFi network list, password entry and the WiFi on/off toggle."""
+    """WiFi network list, password entry, saved network menu and the WiFi toggle.
+
+    Tapping a network opens its menu if it is saved (connect, autoconnect,
+    forget), the keyboard if it needs a password, or a question if it is open.
+    Results come up as a message with an OK button.
+    """
 
     def _init_wifi_settings(self):
         self.wifi_networks = []
         self.wifi_page = 0
         self.wifi_status = None  # message replacing the connection status, if any
-        self.wifi_selected_ssid = None
+        self.wifi_selected_ssid = None  # network the keyboard is for
+        self.wifi_menu_network = None  # saved network whose menu is shown
+        self._wifi_question = None  # ("join" | "forget", ssid) asked on the confirm page
         self._wifi_task = None
-        self._wifi_header = ("", None)  # status and IP last drawn on the list
         self.wifi_keyboard_mode_key = None  # its bounds; None leaves the keyboard stock
         self._wifi_mode_key_pressed = False
 
@@ -75,6 +99,12 @@ class WifiSettingsMixin:
                 self._run_wifi_task(self._wifi_select(self.wifi_networks[index]))
         elif action == "wifi_toggle":
             self._run_wifi_task(self._wifi_toggle())
+        elif action.startswith("wifi_menu_"):
+            self._run_wifi_task(self._wifi_menu_action(action[len("wifi_menu_"):]))
+        elif action in ("wifi_confirm_yes", "wifi_confirm_no"):
+            self._run_wifi_task(self._wifi_answer(action == "wifi_confirm_yes"))
+        elif action == "wifi_message_ok":
+            self._run_wifi_task(self._wifi_leave(PAGE_SETTINGS_WIFI_MESSAGE))
 
     def handle_wifi_password(self, password):
         ssid = self.wifi_selected_ssid
@@ -84,12 +114,73 @@ class WifiSettingsMixin:
             return
         password = clean_wifi_password(password)
         if password is None:
-            # Back to the list, which shows the status instead of the network name
             logger.info(f"WiFi password for {ssid!r} has characters a WiFi password can't contain")
-            self.wifi_status = "Invalid char"
-            self._loop.create_task(self._go_back())
+            self._run_wifi_task(self._wifi_show_message(
+                "The password has a character WiFi passwords can't have"
+            ))
             return
-        self._run_wifi_task(self._wifi_connect(ssid, password, from_keyboard=True))
+        self._run_wifi_task(self._wifi_connect(ssid, password))
+
+    async def _wifi_replace_page(self, page):
+        """Go to page in place of the current one, so back skips the current one."""
+        async with self._history_lock:
+            if len(self.history) > 1:
+                self.history.pop()
+        await self._navigate_to_page(page)
+
+    async def _wifi_show_message(self, text):
+        self.display.stage_wifi_message(text)
+        await self._wifi_replace_page(PAGE_SETTINGS_WIFI_MESSAGE)
+
+    async def _wifi_leave(self, page):
+        if await self._wifi_on_page(page):
+            await self._go_back()
+
+    async def _wifi_open_menu(self, network):
+        self.wifi_menu_network = network
+        self.display.stage_wifi_menu(network["ssid"], network["in_use"], network.get("autoconnect", True))
+        await self._navigate_to_page(PAGE_SETTINGS_WIFI_MENU)
+
+    async def _wifi_menu_action(self, action):
+        network = self.wifi_menu_network
+        if network is None or not await self._wifi_on_page(PAGE_SETTINGS_WIFI_MENU):
+            return
+        ssid = network["ssid"]
+        if action == "connect":
+            if not network["in_use"]:
+                await self._wifi_connect(ssid, None)
+        elif action == "autoconnect":
+            enabled = not network.get("autoconnect", True)
+            if await asyncio.to_thread(set_wifi_autoconnect, ssid, enabled):
+                network["autoconnect"] = enabled
+                await self.display.draw_wifi_menu(ssid, network["in_use"], enabled)
+        elif action == "forget":
+            self._wifi_question = ("forget", ssid)
+            self.display.stage_wifi_confirm("Forget?", f"Forget {ssid}")
+            await self._wifi_replace_page(PAGE_SETTINGS_WIFI_CONFIRM)
+
+    async def _wifi_ask_join_open(self, ssid):
+        self._wifi_question = ("join", ssid)
+        self.display.stage_wifi_confirm("Open network", f"Join {ssid}")
+        await self._navigate_to_page(PAGE_SETTINGS_WIFI_CONFIRM)
+
+    async def _wifi_answer(self, yes):
+        question, self._wifi_question = self._wifi_question, None
+        if question is None or not await self._wifi_on_page(PAGE_SETTINGS_WIFI_CONFIRM):
+            return
+        if not yes:
+            await self._go_back()
+            return
+        kind, ssid = question
+        if kind == "join":
+            await self._wifi_connect(ssid, None)
+        elif kind == "forget":
+            if await asyncio.to_thread(forget_wifi, ssid):
+                self.display.invalidate_wifi_status()
+                self.wifi_networks = await asyncio.to_thread(_load_networks, False)
+                await self._wifi_show_message(f"{ssid} forgotten")
+            else:
+                await self._wifi_show_message(await self._wifi_failure_message(f"Could not forget {ssid}"))
 
     async def handle_wifi_keyboard_touch(self, x, y, pressed):
         """After a tap on the keyboard's mode key, relabel the symbol page if it is up.
@@ -118,8 +209,8 @@ class WifiSettingsMixin:
             logger.debug(f"Could not relabel the WiFi keyboard symbols: {e}")
 
     async def _open_wifi_keyboard(self, ssid):
+        self.display.stage_wifi_password(ssid)
         await self._navigate_to_page(PAGE_SETTINGS_WIFI_PASSWORD)
-        await self.display.draw_wifi_password(ssid)
         self._wifi_mode_key_pressed = False
         self.wifi_keyboard_mode_key = None
         mode_key = getattr(self.display, "wifi_keyboard_mode_key", None)
@@ -141,10 +232,6 @@ class WifiSettingsMixin:
     async def _draw_wifi_list(self):
         if not await self._wifi_on_page(PAGE_SETTINGS_WIFI):
             return
-        # The page comes back with its stock "Label" placeholder in the status
-        # line; cover it before the nmcli calls below, which take a moment
-        last_status, last_ip = self._wifi_header
-        await self.display.draw_wifi_header(self.wifi_status or last_status, last_ip)
         radio_on = await asyncio.to_thread(wifi_radio_enabled)
         ip = await asyncio.to_thread(get_wlan0_ip) if radio_on else None
         status = self.wifi_status
@@ -156,7 +243,6 @@ class WifiSettingsMixin:
                 status = connected["ssid"]
             else:
                 status = "Not connected"
-        self._wifi_header = (status, ip)
         await self.display.draw_wifi_list(self.wifi_networks, self.wifi_page, status, ip)
 
     async def _wifi_failure_status(self, default):
@@ -169,9 +255,14 @@ class WifiSettingsMixin:
             return "Need reboot"
         return default
 
+    async def _wifi_failure_message(self, default):
+        if not await asyncio.to_thread(wifi_permitted):
+            return "WiFi settings need a printer restart first"
+        return default
+
     async def _wifi_scan(self):
         # Show what NetworkManager already knows straight away, then rescan
-        self.wifi_networks = await asyncio.to_thread(scan_networks, False)
+        self.wifi_networks = await asyncio.to_thread(_load_networks, False)
         if not await asyncio.to_thread(wifi_permitted):
             # "dev wifi list --rescan yes" quietly skips a scan it isn't allowed
             # to do and lists only what NetworkManager already knows
@@ -180,7 +271,7 @@ class WifiSettingsMixin:
             return
         self.wifi_status = "Scanning..."
         await self._draw_wifi_list()
-        networks = await asyncio.to_thread(scan_networks, True)
+        networks = await asyncio.to_thread(_load_networks, True)
         if networks:
             self.wifi_networks = networks
             last_page = max(0, (len(networks) - 1) // WIFI_ROWS_PER_PAGE)
@@ -190,35 +281,38 @@ class WifiSettingsMixin:
 
     async def _wifi_select(self, network):
         ssid = network["ssid"]
-        if network["in_use"]:
-            return
-        if network["secured"] and ssid not in await asyncio.to_thread(saved_wifi_connections):
+        profiles = await asyncio.to_thread(saved_wifi_profiles)
+        _annotate([network], profiles)
+        if network["in_use"] or network["saved"]:
+            await self._wifi_open_menu(network)
+        elif network["secured"]:
             self.wifi_selected_ssid = ssid
             await self._open_wifi_keyboard(ssid)
-            return
-        await self._wifi_connect(ssid, None)
-
-    async def _wifi_connect(self, ssid, password, from_keyboard=False):
-        logger.info(f"Connecting to WiFi network {ssid!r}")
-        if from_keyboard:
-            # Straight from the keyboard to the loading overlay, so going back
-            # lands on the list. Showing the list in between only flashed its
-            # stock "Label" placeholder before the overlay replaced it.
-            async with self._history_lock:
-                if self.history and self.history[-1] == PAGE_SETTINGS_WIFI_PASSWORD:
-                    self.history.pop()
-        await self._navigate_to_page(PAGE_OVERLAY_LOADING)
-        ok, output = await asyncio.to_thread(connect_wifi, ssid, password)
-        self.display.invalidate_wifi_status()
-        if ok:
-            self.wifi_status = "Connected"
-        elif "Secrets were required" in output or "psk" in output:
-            self.wifi_status = "Wrong password"
         else:
-            self.wifi_status = await self._wifi_failure_status("Failed")
-        self.wifi_networks = await asyncio.to_thread(scan_networks, False)
+            await self._wifi_ask_join_open(ssid)
+
+    async def _wifi_connect(self, ssid, password):
+        """Connect with the loading overlay up, then show how it went.
+
+        Called from the keyboard, the menu or the open network question, which
+        the overlay replaces, so OK on the result goes back to the list.
+        """
+        logger.info(f"Connecting to WiFi network {ssid!r}")
+        await self._wifi_replace_page(PAGE_OVERLAY_LOADING)
+        ok, output, fallback = await asyncio.to_thread(connect_wifi, ssid, password)
+        self.display.invalidate_wifi_status()
+        self.wifi_status = None
+        self.wifi_networks = await asyncio.to_thread(_load_networks, False)
+        if ok:
+            message = f"Connected to {ssid}"
+        elif "Secrets were required" in output or "psk" in output:
+            message = f"Wrong password for {ssid}"
+        else:
+            message = await self._wifi_failure_message(f"Could not connect to {ssid}")
+        if fallback:
+            message += f". Back on {fallback}"
         if await self._wifi_on_page(PAGE_OVERLAY_LOADING):
-            await self._go_back()  # back to the list, which redraws it
+            await self._wifi_show_message(message)
 
     async def _wifi_toggle(self):
         enable = not await asyncio.to_thread(wifi_radio_enabled)
