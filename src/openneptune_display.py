@@ -46,6 +46,10 @@ from src.colors import (
 )
 
 
+def format_light_status(value):
+    return "On" if value and float(value) > 0 else "Off"
+
+
 class OpenNeptuneDisplayMapper(Mapper):
     page_mapping = {
         PAGE_MAIN: "main",
@@ -138,6 +142,10 @@ class OpenNeptuneDisplayMapper(Mapper):
                             [build_accessor(self.map_page(PAGE_PRINTING), "x_pos")],
                             formatter=lambda x: f"X[{x:3.2f}]",
                         ),
+                        # Slate-only position readout on the move page
+                        MappingLeaf(
+                            [build_accessor(self.map_page(PAGE_PREPARE_MOVE), "x_pos")]
+                        ),
                     ],
                     1: [
                         MappingLeaf(
@@ -147,9 +155,17 @@ class OpenNeptuneDisplayMapper(Mapper):
                             [build_accessor(self.map_page(PAGE_PRINTING), "y_pos")],
                             formatter=lambda y: f"Y[{y:3.2f}]",
                         ),
+                        MappingLeaf(
+                            [build_accessor(self.map_page(PAGE_PREPARE_MOVE), "y_pos")]
+                        ),
                     ],
                     2: [
-                        MappingLeaf([build_accessor(self.map_page(PAGE_MAIN), "z_pos")])
+                        MappingLeaf(
+                            [
+                                build_accessor(self.map_page(PAGE_MAIN), "z_pos"),
+                                build_accessor(self.map_page(PAGE_PREPARE_MOVE), "z_pos"),
+                            ]
+                        )
                     ],
                 },
                 # Slate's print page has no pressure_val (live speed) text
@@ -226,6 +242,11 @@ class OpenNeptuneDisplayMapper(Mapper):
                         [build_accessor(self.map_page(PAGE_PRINTING), "fanspeed")],
                         formatter=format_percent,
                     ),
+                    # Slate-only fan readout on the main page
+                    MappingLeaf(
+                        [build_accessor(self.map_page(PAGE_MAIN), "Fan_Pwr")],
+                        formatter=format_percent,
+                    ),
                     MappingLeaf(
                         [build_accessor(self.map_page(PAGE_SETTINGS), "fanstatue")],
                         field_type="pic",
@@ -250,7 +271,15 @@ class OpenNeptuneDisplayMapper(Mapper):
                         [build_accessor(self.map_page(PAGE_LIGHTS), "led1")],
                         field_type="pic",
                         formatter=lambda x: "77" if int(x) == 1 else "76",
-                    )
+                    ),
+                    # Slate-only light status text on the main and print pages
+                    MappingLeaf(
+                        [
+                            build_accessor(self.map_page(PAGE_MAIN), "Light_Stat"),
+                            build_accessor(self.map_page(PAGE_PRINTING), "Light_Stat"),
+                        ],
+                        formatter=format_light_status,
+                    ),
                 ]
             },
             "output_pin Frame_Light": {
@@ -259,7 +288,14 @@ class OpenNeptuneDisplayMapper(Mapper):
                         [build_accessor(self.map_page(PAGE_LIGHTS), "led2")],
                         field_type="pic",
                         formatter=lambda x: "77" if int(x) == 1 else "76",
-                    )
+                    ),
+                    MappingLeaf(
+                        [
+                            build_accessor(self.map_page(PAGE_MAIN), "Light_Stat"),
+                            build_accessor(self.map_page(PAGE_PRINTING), "Light_Stat"),
+                        ],
+                        formatter=format_light_status,
+                    ),
                 ]
             },
         }
@@ -284,6 +320,7 @@ class OpenNeptuneDisplayMapper(Mapper):
                 MappingLeaf(
                     [
                         build_accessor(self.map_page(PAGE_MAIN), "z_pos"),
+                        build_accessor(self.map_page(PAGE_PREPARE_MOVE), "z_pos"),
                         build_accessor(self.map_page(PAGE_PRINTING), "zvalue"),
                     ]
                 )
