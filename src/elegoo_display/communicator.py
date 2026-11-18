@@ -93,8 +93,8 @@ class ElegooDisplayCommunicator(ElegooScreensMixin, ElegooWifiScreensMixin, Disp
                         self._about_ip_field = field
                         self.logger.debug(f"About page IP field: {field}")
                         break
-                except Exception:
-                    pass
+                except Exception as e:
+                    self.logger.debug(f"About page field {field} not readable: {e}")
             else:
                 return "b[16]"
         return self._about_ip_field
