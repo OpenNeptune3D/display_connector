@@ -203,29 +203,14 @@ class OpenNeptune4ProMapper(OpenNeptune4Mapper):
         self.page_mapping[PAGE_PREPARE_TEMP] = "pretemp"
         self.page_mapping[PAGE_PRINTING_FILAMENT] = "adjusttemp_pro"
         super().__init__()
+        # Slate has no *_t target texts on pretemp or adjusttemp_pro
         self.data_mapping["extruder"]["target"] = [
-            MappingLeaf(
-                [
-                    build_accessor(self.map_page(PAGE_PREPARE_TEMP), "nozzletemp_t"),
-                    build_accessor(
-                        self.map_page(PAGE_PRINTING_FILAMENT), "nozzletemp_t"
-                    ),
-                ],
-                formatter=format_temp,
-            ),
             MappingLeaf(
                 [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "nozzle")],
                 formatter=lambda x: f"{x:.0f}",
             ),
         ]
         self.data_mapping["heater_bed"]["target"] = [
-            MappingLeaf(
-                [
-                    build_accessor(self.map_page(PAGE_PREPARE_TEMP), "bedtemp_t"),
-                    build_accessor(self.map_page(PAGE_PRINTING_FILAMENT), "bedtemp_t"),
-                ],
-                formatter=format_temp,
-            ),
             MappingLeaf(
                 [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "bed")],
                 formatter=lambda x: f"{x:.0f}",
@@ -245,17 +230,6 @@ class OpenNeptune4ProMapper(OpenNeptune4Mapper):
                 )
             ],
             "target": [
-                MappingLeaf(
-                    [
-                        build_accessor(
-                            self.map_page(PAGE_PREPARE_TEMP), "out_bedtemp_t"
-                        ),
-                        build_accessor(
-                            self.map_page(PAGE_PRINTING_FILAMENT), "out_bedtemp_t"
-                        ),
-                    ],
-                    formatter=format_temp,
-                ),
                 MappingLeaf(
                     [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "hot_bed")],
                     formatter=lambda x: f"{x:.0f}",

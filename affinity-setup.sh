@@ -1,69 +1,36 @@
 #!/bin/sh
-# Minimal display affinity helper:
-# - optionally set CPU governor to performance
-# - de-prioritize display.service so UI work is less likely to interfere
-#   with Klipper/Moonraker on low-power SBCs
+# Retired affinity helper: one-time cleanup of the legacy affinity.service.
+#
+# Earlier versions pinned Klipper/IRQs to CPUs, ran klippy and klipper-mcu at
+# SCHED_FIFO 60 and disabled RT throttling, which could starve Klipper's serial
+# thread (OpenNept4une#445). This removes the unit, its enable symlinks, the old
+# /usr/local/sbin copy and any runtime unit properties it set. Runtime scheduling
+# changes already applied to running processes clear on the next reboot.
+# CPU governor policy is owned by the image (/etc/default/cpufrequtils).
 
-set -eu
-
-TAG="display-affinity-minimal"
-ENABLE_PERFORMANCE_GOVERNOR="${ENABLE_PERFORMANCE_GOVERNOR:-yes}"
+TAG="display-affinity-cleanup"
 
 log() {
   logger -t "$TAG" -- "$@" 2>/dev/null || true
   printf '%s: %s\n' "$TAG" "$*"
 }
 
-have() { command -v "$1" >/dev/null 2>&1; }
-
-# Re-exec as root because systemd may call this via affinity.service.
+# Re-exec as root when run from the installer as a normal user.
 if [ "$(id -u)" != 0 ]; then
   exec sudo -E -- "$0" "$@"
 fi
 
-mainpid() {
-  unit="$1"
-  systemctl show -p MainPID --value "$unit" 2>/dev/null || echo 0
-}
+systemctl disable affinity.service >/dev/null 2>&1 || true
+# Older units were also WantedBy klipper, klipper-mcu and multi-user.target.
+find /etc/systemd/system -path '*.wants/affinity.service' -delete 2>/dev/null || true
+rm -f /etc/systemd/system/affinity.service /usr/local/sbin/affinity-setup.sh
 
-renice_unit() {
-  unit="$1"
-  nice_val="$2"
-  pid="$(mainpid "$unit")"
-  [ "$pid" -gt 0 ] || return 0
-  renice "$nice_val" -p "$pid" >/dev/null 2>&1 || true
-}
+# Drop runtime properties set via 'systemctl set-property --runtime'.
+for prop in AllowedCPUs CPUSchedulingPolicy CPUSchedulingPriority; do
+  rm -f /run/systemd/system.control/*.service.d/50-"$prop".conf
+done
 
-ionice_idle_unit() {
-  unit="$1"
-  pid="$(mainpid "$unit")"
-  [ "$pid" -gt 0 ] || return 0
-  have ionice || return 0
-  ionice -c3 -p "$pid" >/dev/null 2>&1 || true
-}
-
-set_performance_governor() {
-  [ "$ENABLE_PERFORMANCE_GOVERNOR" = "yes" ] || {
-    log "Skipping CPU governor change"
-    return 0
-  }
-
-  if have cpupower; then
-    cpupower frequency-set -g performance >/dev/null 2>&1 || true
-  else
-    for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
-      [ -w "$g" ] && echo performance > "$g" 2>/dev/null || true
-    done
-  fi
-  log "CPU governor set to performance (best effort)"
-}
-
-set_performance_governor
-
-# Keep the UI process gentle. Do not touch klipper/klipper-mcu scheduling,
-# CPU affinity, IRQ affinity, or serial driver tuning here.
-renice_unit display.service 19
-ionice_idle_unit display.service
-log "Applied gentle priority tuning to display.service"
+systemctl daemon-reload >/dev/null 2>&1 || true
+log "Removed legacy affinity.service; reboot to clear any leftover realtime scheduling"
 
 exit 0

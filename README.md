@@ -21,6 +21,18 @@ Allows you to use the Touch screen from your neptune 3 or 4 printer with a stock
 - Elegoo Neptune 4 Plus
 - Elegoo Neptune 4 Max
 
+## WiFi Settings
+
+Settings → WLAN on the touch screen lists nearby networks and joins them, including on models that use a USB WiFi adapter. The display service sets up the permission it needs for this when it starts.
+
+The on-screen keyboard only has letters and digits. For a network whose password contains symbols, join it once over SSH:
+
+```bash
+sudo nmcli dev wifi connect "<network name>" password "<password>"
+```
+
+NetworkManager saves the network. After that you can switch to it from the touch screen without typing the password again.
+
 ## Install
 
 Running the `display-service-installer.sh` script on your printer should be enough to get everything working. Currently the connector mostly works on printers with [OpenNept4une](https://github.com/OpenNeptune3D/OpenNept4une).

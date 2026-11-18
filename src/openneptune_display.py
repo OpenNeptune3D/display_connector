@@ -1,4 +1,5 @@
 from src.elegoo_display import ElegooDisplayCommunicator
+from src.response_actions import openneptune_response_actions
 from src.mapping import (
     Mapper,
     MappingLeaf,
@@ -43,6 +44,10 @@ from src.colors import (
     BACKGROUND_DIALOG,
     BACKGROUND_GRAY,
 )
+
+
+def format_light_status(value):
+    return "On" if value and float(value) > 0 else "Off"
 
 
 class OpenNeptuneDisplayMapper(Mapper):
@@ -103,12 +108,8 @@ class OpenNeptuneDisplayMapper(Mapper):
                         formatter=format_temp,
                     )
                 ],
-                "target": [
-                    MappingLeaf(
-                        [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "nozzletemp_t")],
-                        formatter=lambda x: f"{x:.0f}",
-                    )
-                ],
+                # Slate's pretemp has no nozzletemp_t target text
+                "target": [MappingLeaf([])],
             },
             "heater_bed": {
                 "temperature": [
@@ -128,12 +129,8 @@ class OpenNeptuneDisplayMapper(Mapper):
                         formatter=format_temp,
                     )
                 ],
-                "target": [
-                    MappingLeaf(
-                        [build_accessor(self.map_page(PAGE_PREPARE_TEMP), "bedtemp_t")],
-                        formatter=lambda x: f"{x:.0f}",
-                    )
-                ],
+                # Slate's pretemp has no bedtemp_t target text
+                "target": [MappingLeaf([])],
             },
             "motion_report": {
                 "live_position": {
@@ -145,6 +142,10 @@ class OpenNeptuneDisplayMapper(Mapper):
                             [build_accessor(self.map_page(PAGE_PRINTING), "x_pos")],
                             formatter=lambda x: f"X[{x:3.2f}]",
                         ),
+                        # Slate-only position readout on the move page
+                        MappingLeaf(
+                            [build_accessor(self.map_page(PAGE_PREPARE_MOVE), "x_pos")]
+                        ),
                     ],
                     1: [
                         MappingLeaf(
@@ -154,25 +155,28 @@ class OpenNeptuneDisplayMapper(Mapper):
                             [build_accessor(self.map_page(PAGE_PRINTING), "y_pos")],
                             formatter=lambda y: f"Y[{y:3.2f}]",
                         ),
+                        MappingLeaf(
+                            [build_accessor(self.map_page(PAGE_PREPARE_MOVE), "y_pos")]
+                        ),
                     ],
                     2: [
-                        MappingLeaf([build_accessor(self.map_page(PAGE_MAIN), "z_pos")])
+                        MappingLeaf(
+                            [
+                                build_accessor(self.map_page(PAGE_MAIN), "z_pos"),
+                                build_accessor(self.map_page(PAGE_PREPARE_MOVE), "z_pos"),
+                            ]
+                        )
                     ],
                 },
-                "live_velocity": [
-                    MappingLeaf(
-                        [build_accessor(self.map_page(PAGE_PRINTING), "pressure_val")],
-                        formatter=lambda x: f"{x:3.2f}mm/s",
-                    )
-                ],
+                # Slate's print page has no pressure_val (live speed) text
+                "live_velocity": [MappingLeaf([])],
             },
             "print_stats": {
                 "print_duration": [
                     MappingLeaf(
-                        [
-                            build_accessor(self.map_page(PAGE_PRINTING), "printtime"),
-                            build_accessor(self.map_page(PAGE_PRINTING_COMPLETE), "t0"),
-                        ],
+                        # Slate's print page has no printtime text; only the
+                        # print-complete page shows the duration
+                        [build_accessor(self.map_page(PAGE_PRINTING_COMPLETE), "t0")],
                         formatter=format_time,
                     )
                 ],
@@ -238,6 +242,11 @@ class OpenNeptuneDisplayMapper(Mapper):
                         [build_accessor(self.map_page(PAGE_PRINTING), "fanspeed")],
                         formatter=format_percent,
                     ),
+                    # Slate-only fan readout on the main page
+                    MappingLeaf(
+                        [build_accessor(self.map_page(PAGE_MAIN), "Fan_Pwr")],
+                        formatter=format_percent,
+                    ),
                     MappingLeaf(
                         [build_accessor(self.map_page(PAGE_SETTINGS), "fanstatue")],
                         field_type="pic",
@@ -246,11 +255,9 @@ class OpenNeptuneDisplayMapper(Mapper):
                 ]
             },
             "display_status": {
+                # Slate's print page has no printvalue (percent) text, only
+                # the printprocess progress bar
                 "progress": [
-                    MappingLeaf(
-                        [build_accessor(self.map_page(PAGE_PRINTING), "printvalue")],
-                        formatter=lambda x: f"{x * 100:2.0f}%",
-                    ),
                     MappingLeaf(
                         [build_accessor(self.map_page(PAGE_PRINTING), "printprocess")],
                         field_type="val",
@@ -264,7 +271,15 @@ class OpenNeptuneDisplayMapper(Mapper):
                         [build_accessor(self.map_page(PAGE_LIGHTS), "led1")],
                         field_type="pic",
                         formatter=lambda x: "77" if int(x) == 1 else "76",
-                    )
+                    ),
+                    # Slate-only light status text on the main and print pages
+                    MappingLeaf(
+                        [
+                            build_accessor(self.map_page(PAGE_MAIN), "Light_Stat"),
+                            build_accessor(self.map_page(PAGE_PRINTING), "Light_Stat"),
+                        ],
+                        formatter=format_light_status,
+                    ),
                 ]
             },
             "output_pin Frame_Light": {
@@ -273,7 +288,14 @@ class OpenNeptuneDisplayMapper(Mapper):
                         [build_accessor(self.map_page(PAGE_LIGHTS), "led2")],
                         field_type="pic",
                         formatter=lambda x: "77" if int(x) == 1 else "76",
-                    )
+                    ),
+                    MappingLeaf(
+                        [
+                            build_accessor(self.map_page(PAGE_MAIN), "Light_Stat"),
+                            build_accessor(self.map_page(PAGE_PRINTING), "Light_Stat"),
+                        ],
+                        formatter=format_light_status,
+                    ),
                 ]
             },
         }
@@ -298,6 +320,7 @@ class OpenNeptuneDisplayMapper(Mapper):
                 MappingLeaf(
                     [
                         build_accessor(self.map_page(PAGE_MAIN), "z_pos"),
+                        build_accessor(self.map_page(PAGE_PREPARE_MOVE), "z_pos"),
                         build_accessor(self.map_page(PAGE_PRINTING), "zvalue"),
                     ]
                 )
@@ -320,6 +343,7 @@ class OpenNeptuneDisplayMapper(Mapper):
 
 class OpenNeptuneDisplayCommunicator(ElegooDisplayCommunicator):
     supported_firmware_versions = ["0.1.5"]
+    extra_response_actions = openneptune_response_actions
 
     bed_leveling_box_size = 20
 
@@ -350,23 +374,20 @@ class OpenNeptuneDisplayCommunicator(ElegooDisplayCommunicator):
                 + self.ips
                 + '"'
             )
-            await self.write("fill 0,400,320,60," + str(BACKGROUND_GRAY))
+            await self.write("fill 0,400,272,60," + str(BACKGROUND_GRAY))
             await self.write(
-                "xstr 0,400,320,30,1,65535,"
+                "xstr 0,400,272,30,1,65535,"
                 + str(BACKGROUND_GRAY)
                 + ',1,1,1,"OpenNept4une"'
             )
             await self.write(
-                "xstr 0,430,320,30,2,GRAY,"
+                "xstr 0,430,272,30,2,GRAY,"
                 + str(BACKGROUND_GRAY)
                 + ',1,1,1,"github.com/OpenNeptune3D"'
             )
-        elif current_page == PAGE_PRINTING:
-            await self.write("printvalue.xcen=0")
-            await self.write("move printvalue,13,267,13,267,0,10")
-            await self.write("vis b[16],0")
         elif current_page == PAGE_PRINTING_COMPLETE:
-            await self.write('b[4].txt="Print Completed!"')
+            # By name: Slate moved t1 from id 4 to id 2 (id 4 is hotspot m1)
+            await self.write('t1.txt="Print Completed!"')
         elif current_page == PAGE_PRINTING_ADJUST:
             await self.write('t9.txt="' + self.ips + '"')
         elif current_page == PAGE_LEVELING:
@@ -380,8 +401,48 @@ class OpenNeptuneDisplayCommunicator(ElegooDisplayCommunicator):
         elif current_page == PAGE_PRINTING_DIALOG_FLOW:
             await self.write("b[3].maxval=200")
         elif current_page == PAGE_SHUTDOWN_DIALOG:
-            await self.write("fill 20,100,232,240," + str(BACKGROUND_DIALOG))
+            await self.write("fill 20,100,232,290," + str(BACKGROUND_DIALOG))
             await self.write('xstr 24,104,224,50,1,65535,10665,1,1,1,"Shut Down Host"')
             await self.write('xstr 24,158,224,50,1,65535,10665,1,1,1,"Reboot Host"')
             await self.write('xstr 24,212,224,50,1,65535,10665,1,1,1,"Reboot Klipper"')
-            await self.write('xstr 24,286,224,50,1,65535,10665,1,1,1,"Back"')
+            await self.write('xstr 24,266,224,50,1,65535,10665,1,1,1,"Firmware Restart"')
+            await self.write('xstr 24,320,224,50,1,65535,10665,1,1,1,"Back"')
+
+    # Slate renumbered or removed components the stock UI code writes by id;
+    # these overrides target Slate's layout instead.
+
+    async def update_time_remaining(self, time_remaining):
+        # Stock writes b[37] (t7); in Slate t7 is id 22
+        await self.write(
+            f'{self.mapper.map_page(PAGE_PRINTING)}.t7.txt="{time_remaining}"'
+        )
+
+    async def update_printing_heater_settings_ui(
+        self, printing_selected_heater, printing_target_temp
+    ):
+        if self.has_two_beds:
+            # adjusttemp_pro's b0-b2 and targettemp line up with stock
+            await super().update_printing_heater_settings_ui(
+                printing_selected_heater, printing_target_temp
+            )
+            return
+        # Stock writes a heater highlight to b[13] (picture p0) and the target to
+        # b[35]; Slate has no p0 (id 13 is hotspot m10) and targettemp is id 26
+        await self.write(
+            f'{self.mapper.map_page(PAGE_PRINTING_FILAMENT)}.targettemp.txt="'
+            + f'{printing_target_temp:.0f}"'
+        )
+
+    async def update_printing_temperature_increment_ui(
+        self, printing_selected_temp_increment
+    ):
+        # Slate's adjusttemp and adjusttemp_pro have no p1 step-highlight picture
+        pass
+
+    async def update_prepare_move_ui(self, move_distance):
+        # Slate's premove has no p0 step-highlight picture
+        pass
+
+    async def update_printing_state_ui(self, state):
+        # Slate's print page has no b[44] pause/resume picture
+        pass

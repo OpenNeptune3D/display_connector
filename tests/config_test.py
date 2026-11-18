@@ -3,7 +3,8 @@ import logging
 import os
 from configparser import NoSectionError
 
-from src.config import ConfigHandler
+from src.config import ConfigHandler, LEGACY_CLEAN_FILENAME_REGEX
+from src.mapping import DEFAULT_CLEAN_FILENAME_REGEX
 
 logger = logging.getLogger(__name__)
 
@@ -65,3 +66,33 @@ def test_safe_get_no_option(tmp_path):
 
     assert config.safe_get("test", "t2") is None
     assert config.safe_get("test", "t2", "default") == "default"
+
+
+def test_new_config_uses_default_filename_regex(tmp_path):
+    config = ConfigHandler(str(tmp_path) + "/test_config.ini", logger)
+    assert config.get("general", "clean_filename_regex") == DEFAULT_CLEAN_FILENAME_REGEX
+
+
+def test_migrates_legacy_filename_regex(tmp_path):
+    path = str(tmp_path) + "/test_config.ini"
+    with open(path, "w") as f:
+        f.write(
+            "[general]\n"
+            "clean_filename_regex = " + LEGACY_CLEAN_FILENAME_REGEX + "\n"
+            "\n; a user comment\n[files]\nsort_by = modified\n"
+        )
+    config = ConfigHandler(path, logger)
+    assert config.get("general", "clean_filename_regex") == DEFAULT_CLEAN_FILENAME_REGEX
+    with open(path, "r") as f:
+        content = f.read()
+    assert "; a user comment" in content
+    assert LEGACY_CLEAN_FILENAME_REGEX not in content
+
+
+def test_keeps_custom_filename_regex(tmp_path):
+    path = str(tmp_path) + "/test_config.ini"
+    custom = r"(.*)_custom\.gcode"
+    with open(path, "w") as f:
+        f.write("[general]\nclean_filename_regex = " + custom + "\n")
+    config = ConfigHandler(path, logger)
+    assert config.get("general", "clean_filename_regex") == custom
