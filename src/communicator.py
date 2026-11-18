@@ -149,9 +149,17 @@ class DisplayCommunicator:
         async with self._nav_lock:
             try:
                 await self.write(f"page {page_id}", blocked_key="__nav__", auto_unblock=False)
+                # Fill in the page ahead of everything queued during the swap, so
+                # its stock placeholder texts don't show while the queue drains
+                for command in self.page_entry_commands(page_id):
+                    await self.write(command, blocked_key="__nav__", auto_unblock=False)
                 await asyncio.sleep(0.25)  # give the HMI time to swap pages
             finally:
                 await self.unblock("__nav__")
+
+    def page_entry_commands(self, page_id):
+        """Commands to send right after switching to page_id (none by default)."""
+        return []
 
     async def update_data(self, new_data, data_mapping=None, current_data=None):
         if data_mapping is None:

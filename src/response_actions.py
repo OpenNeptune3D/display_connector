@@ -19,6 +19,7 @@ from src.mapping import (
     PAGE_PRINTING_DIALOG_FLOW,
     PAGE_LIGHTS,
     PAGE_SHUTDOWN_DIALOG,
+    PAGE_SETTINGS_WIFI_ERROR,
 )
 
 # Extra touches sent only by the OpenNeptune (Slate) firmware, checked before response_actions
@@ -125,6 +126,13 @@ response_actions = {
         11: "wifi_page_next",
         12: "wifi_toggle",
     },
+    # Stock pages relabelled for WiFi (component 0 is their back arrow): the
+    # "Print mode" list as a saved network's menu, the "Leveling mode" list as a
+    # yes/no question and the PID "Detection completed" page as a message (the
+    # failure one is in custom_touch_actions)
+    134: {1: "wifi_menu_connect", 2: "wifi_menu_autoconnect", 3: "wifi_menu_forget"},
+    136: {1: "wifi_confirm_yes", 2: "wifi_confirm_no", 3: "wifi_confirm_no"},
+    125: {1: "wifi_message_ok"},
     # Confirm Print
     18: {0: "print_opened_file", 1: "go_back"},
     # Printing
@@ -257,10 +265,12 @@ response_actions = {
     },
 }
 
-# Text typed on a keyboard page, sent when its OK button is pressed
+# Text typed on a keyboard page, sent when its OK button is pressed. Keyed by
+# page only: the second byte isn't reliably the input's id (a Neptune 4 Pro sent
+# 0x03 after picking a network, 0x01 when keybdA was opened directly).
 text_input_actions = {
     # keybdA, the WiFi password keyboard
-    132: {1: "wifi_password"},
+    132: "wifi_password",
 }
 
 input_actions = {
@@ -302,6 +312,12 @@ custom_touch_actions = {
         (24, 320, 248, 370): "go_back",           # Back button
     },
     "printing_kamp": {(40, 400, 230, 450): "save_config"},
+    # The input shaper "detection failed" page (121) used for WiFi failures: its
+    # button sends no touch event in the stock firmware, so it goes by position
+    PAGE_SETTINGS_WIFI_ERROR: {
+        (25, 260, 252, 309): "wifi_message_ok",  # OK
+        (0, 0, 54, 41): "wifi_message_ok",  # back arrow
+    },
 }
 
 # Tabs whose button in the stock Elegoo firmware sends no touch event (and so neither
