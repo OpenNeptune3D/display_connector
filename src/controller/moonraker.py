@@ -232,5 +232,11 @@ class MoonrakerMixin:
                 await self.handle_status_update(item["params"][0])
             elif item.get("method") == "notify_gcode_response":
                 await self.handle_gcode_response(item["params"][0])
+            elif item.get("method") == "notify_klippy_ready":
+                # Moonraker drops every client's object subscriptions when Klippy
+                # restarts (e.g. after saving printer.cfg), so subscribe again;
+                # otherwise print state changes never reach the display.
+                logger.info("Klippy ready - resubscribing to printer objects")
+                self.klipper_restart_event.set()
         logger.info("Unix Socket Disconnection from _process_stream()")
         await self.close()

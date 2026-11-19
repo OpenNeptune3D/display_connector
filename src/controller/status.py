@@ -235,7 +235,8 @@ class StatusMixin:
                 else:
                     self._loop.create_task(self._handle_bed_leveling_complete())
 
-        progress = new_data.get("display_status", {}).get("progress", 0)
+        # Moonraker reports null progress while Klippy is starting up
+        progress = new_data.get("display_status", {}).get("progress") or 0
         if progress > 0.001 and current_page == PAGE_PRINTING_KAMP:
             logger.info("Print progress > 0 while on KAMP page - restoring printing page")
             self.bed_leveling_probed_count = 0
