@@ -12,10 +12,31 @@ import signal
 from src import sd_notify
 from src.config import ConfigHandler
 from watchdog.observers import Observer
-from watchdog.events import PatternMatchingEventHandler
+from watchdog.events import FileSystemEventHandler
 
 from src.controller import DisplayController
 from src.controller.common import logger, setup_logging
+
+
+class FileNameEventHandler(FileSystemEventHandler):
+    """Pass on events for files with one of the given names, in any watchdog version.
+
+    Recent watchdog releases (7.1 here) match PatternMatchingEventHandler patterns
+    against the whole path (PurePath.full_match), so a bare name like "klippy.sock"
+    never matches and the handler silently gets nothing. Compare file names instead.
+    """
+
+    def __init__(self, names):
+        super().__init__()
+        self._names = frozenset(names)
+
+    def dispatch(self, event):
+        if event.is_directory:
+            return
+        paths = (event.src_path, getattr(event, "dest_path", "") or "")
+        if any(os.path.basename(os.fsdecode(path)) in self._names for path in paths if path):
+            super().dispatch(event)
+
 
 # Global flag for graceful shutdown
 _shutdown_requested = False
@@ -69,19 +90,14 @@ try:
                 logger.info(
                     f"{notifier.src_path.split('/')[-1]} created. Attempting to reconnect..."
                 )
-                controller.klipper_restart_event.set()
+                # Runs on the watchdog thread; asyncio.Event isn't thread-safe
+                loop.call_soon_threadsafe(controller.klipper_restart_event.set)
         except Exception as e:
             logger.error(f"Error handling socket change: {e}")
             logger.error(traceback.format_exc())
 
     # watch the config file
-    config_patterns = ["display_connector.cfg"]
-    config_event_handler = PatternMatchingEventHandler(
-        patterns=config_patterns,
-        ignore_patterns=None,
-        ignore_directories=True,
-        case_sensitive=True,
-    )
+    config_event_handler = FileNameEventHandler(["display_connector.cfg"])
     config_event_handler.on_modified = handle_wd_callback
     config_event_handler.on_created = handle_wd_callback
     config_observer.schedule(
@@ -89,13 +105,7 @@ try:
     )
 
     # watch the socket directory
-    socket_patterns = ["klippy.sock", "moonraker.sock"]
-    socket_event_handler = PatternMatchingEventHandler(
-        patterns=socket_patterns,
-        ignore_patterns=None,
-        ignore_directories=True,
-        case_sensitive=True,
-    )
+    socket_event_handler = FileNameEventHandler(["klippy.sock", "moonraker.sock"])
     socket_event_handler.on_modified = handle_sock_changes
     socket_event_handler.on_created = handle_sock_changes
     socket_event_handler.on_deleted = handle_sock_changes
