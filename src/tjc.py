@@ -207,6 +207,18 @@ class TJCProtocol(NextionProtocol):
                 return None, False
             return None, False
 
+        # Some panel replies omit part or all of the ACK terminator before a touch.
+        if message.startswith(b"\x01"):
+            touch = message[1:].lstrip(b"\xff")
+            if (
+                len(message) in (7, 8, 9)
+                and len(touch) == 6
+                and touch[0] == EventType.TOUCH_COORDINATE
+                and touch[-1] in (0, 1)
+            ):
+                self.buffer = touch + eol + leftover
+                return b"\x01", False
+
         self.buffer = leftover
         return message, False
 
