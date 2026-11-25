@@ -2,7 +2,7 @@ import asyncio
 from collections import deque
 from logging import Logger
 from src.tjc import TJCClient
-from nextion.exceptions import CommandFailed
+from nextion.exceptions import CommandFailed, CommandTimeout
 
 def _deep_merge(dst, src):
     """Merge a (partial) Moonraker status update into the stored state, in place."""
@@ -65,15 +65,15 @@ class DisplayCommunicator:
         try:
             effective_timeout = self.timeout if timeout is None else timeout
             await asyncio.wait_for(
-                self.display.command(data, effective_timeout),
+                self.display.command(data, effective_timeout, attempts=1),
                 timeout=effective_timeout + 1  # slight cushion over device timeout
             )
-        except asyncio.TimeoutError:
+        except (asyncio.TimeoutError, CommandTimeout):
             self.logger.warning(f"Display write timed out for command: {data}")
-            # Quick, robust recovery: re-sync the panel and bail out of this burst
+            # A page-change timeout leaves the panel and host potentially out of sync.
+            if not data.startswith("page ") and await self._panel_responds():
+                return
             try:
-                # If your client exposes .reconnect(), use it; otherwise call whatever
-                # you use on initial connect/init (bkcmd, sleep=0, sendme, etc.).
                 await self.display.reconnect()
             except Exception as e:
                 self.logger.warning(f"Display reconnect failed after timeout: {e}")
@@ -85,6 +85,17 @@ class DisplayCommunicator:
         except Exception as e:
             # Any other error: log and continue
             self.logger.warning(f"Unexpected error writing to display: {e}")
+
+    async def _panel_responds(self):
+        try:
+            page_id = await asyncio.wait_for(
+                self.display.command("sendme", timeout=1, attempts=1), timeout=1
+            )
+        except Exception as e:
+            self.logger.debug(f"Display page query failed after timeout: {e}")
+            return False
+        # A plain ACK (True), possibly from the timed-out write, is not a page response.
+        return type(page_id) is int
 
     async def write(self, data, timeout=None, blocked_key=None, auto_unblock=True):
         # Fast path: decide blocking under lock

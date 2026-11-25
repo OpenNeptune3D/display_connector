@@ -1,7 +1,9 @@
+import asyncio
 import logging
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 import pytest
 
+from nextion.exceptions import CommandTimeout
 from src.communicator import DisplayCommunicator
 
 
@@ -19,6 +21,47 @@ def test_get_device_name(communicator):
 def test_get_display_type_name(communicator):
     # Should just be the class name
     assert communicator.get_display_type_name() == "DisplayCommunicator"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("page_response, reconnect", [
+    (0, False),
+    (True, True),
+    (None, True),
+    (CommandTimeout("no page response"), True),
+    (asyncio.TimeoutError(), True),
+])
+async def test_display_write_timeout_checks_panel_before_reconnecting(
+    communicator, page_response, reconnect
+):
+    def command(data, *args, **kwargs):
+        if data != "sendme":
+            raise CommandTimeout("missing acknowledgment")
+        if isinstance(page_response, Exception):
+            raise page_response
+        return page_response
+
+    communicator.display.command = AsyncMock(side_effect=command)
+    communicator.display.reconnect = AsyncMock()
+
+    await communicator.write('main.out_bedtemp.txt="17.3"')
+
+    assert communicator.display.command.await_args_list == [
+        call('main.out_bedtemp.txt="17.3"', communicator.timeout, attempts=1),
+        call("sendme", timeout=1, attempts=1),
+    ]
+    assert communicator.display.reconnect.await_count == int(reconnect)
+
+
+@pytest.mark.asyncio
+async def test_page_change_timeout_still_reconnects(communicator):
+    communicator.display.command = AsyncMock(side_effect=asyncio.TimeoutError)
+    communicator.display.reconnect = AsyncMock()
+
+    await communicator.write("page leveling")
+
+    communicator.display.command.assert_awaited_once()
+    communicator.display.reconnect.assert_awaited_once()
 
 
 @pytest.mark.asyncio

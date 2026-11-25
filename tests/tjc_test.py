@@ -35,6 +35,31 @@ def test_data_received_touch_event():
     protocol.data_received(b"\x65\xF1\x02\xFF\xFF\xFF\xFF")
     m.assert_called_once_with(b"\x65\xF1\x02")
 
+
+@pytest.mark.parametrize("separator", [b"", b"\xff", b"\xff\xff", b"\xff\xff\xff"])
+def test_acknowledgment_followed_by_touch_coordinates(separator):
+    touches = []
+    protocol = TJCProtocol(touches.append)
+    touch = bytes.fromhex("67 00 2f 00 f2 00")
+    wire = b"\x01" + separator + touch + protocol.EOL
+    for byte in wire:
+        protocol.data_received(bytes([byte]))
+
+    assert protocol.queue.get_nowait() == b"\x01"
+    assert touches == [touch]
+    assert protocol.queue.empty()
+
+
+def test_invalid_touch_does_not_turn_partial_acknowledgment_into_success():
+    touches = []
+    protocol = TJCProtocol(touches.append)
+    malformed = bytes.fromhex("01 ff 67 00 2f 00 f2 02")
+    protocol.data_received(malformed + protocol.EOL)
+
+    assert protocol.queue.get_nowait() == malformed
+    assert not touches
+
+
 def test_data_received_number():
     m = MagicMock()
     protocol = TJCProtocol(m)

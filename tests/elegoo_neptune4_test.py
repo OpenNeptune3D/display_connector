@@ -44,8 +44,8 @@ async def test_initializing():
     await communicator.initialize_display()
     assert communicator.mapper is not None
     communicator.display.command.assert_has_calls([
-        call("sendxy=1", 5),
-        call("main.q4.picc=213", 5)
+        call("sendxy=1", 5, attempts=1),
+        call("main.q4.picc=213", 5, attempts=1)
         ])
     
 
@@ -56,9 +56,9 @@ async def test_initializing_pro():
     await communicator.initialize_display()
     assert communicator.mapper is not None
     communicator.display.command.assert_has_calls([
-        call("sendxy=1", 5),
-        call('main.disp_q5.val=1', 5),
-        call("main.q4.picc=214", 5)
+        call("sendxy=1", 5, attempts=1),
+        call('main.disp_q5.val=1', 5, attempts=1),
+        call("main.q4.picc=214", 5, attempts=1)
         ])
     
 
@@ -69,8 +69,8 @@ async def test_initializing_plus():
     await communicator.initialize_display()
     assert communicator.mapper is not None
     communicator.display.command.assert_has_calls([
-        call("sendxy=1", 5),
-        call("main.q4.picc=313", 5)
+        call("sendxy=1", 5, attempts=1),
+        call("main.q4.picc=313", 5, attempts=1)
         ])
     
 
@@ -81,6 +81,6 @@ async def test_initializing_max():
     await communicator.initialize_display()
     assert communicator.mapper is not None
     communicator.display.command.assert_has_calls([
-        call("sendxy=1", 5),
-        call("main.q4.picc=314", 5)
+        call("sendxy=1", 5, attempts=1),
+        call("main.q4.picc=314", 5, attempts=1)
         ])
